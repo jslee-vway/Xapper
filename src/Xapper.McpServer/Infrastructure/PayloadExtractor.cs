@@ -1,8 +1,13 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace Xapper.McpServer.Infrastructure;
 
 /// <summary>
 /// 임베디드 리소스로 내장된 인젝션 페이로드 DLL을 임시 디렉토리에 추출합니다.
 /// TFM별 Inspector DLL과 GenericInjector DLL의 파일 경로를 제공.
+/// 추출 디렉토리 이름은 페이로드 내용의 해시로 정한다. 페이로드가 바뀌면 자연히 다른 디렉토리에
+/// 풀리므로, 낡은 DLL이 그대로 주입되는 일도 없고 이미 주입돼 잠긴 파일을 덮어쓸 일도 없다.
 /// </summary>
 public sealed class PayloadExtractor
 {
@@ -44,13 +49,12 @@ public sealed class PayloadExtractor
 
     /// <summary>
     /// <see cref="PayloadExtractor"/>의 새 인스턴스를 생성합니다.
-    /// 어셈블리 버전 기반의 추출 디렉토리 경로를 결정.
+    /// 페이로드 내용 해시 기반의 추출 디렉토리 경로를 결정.
     /// </summary>
     public PayloadExtractor()
     {
         var assembly = typeof(PayloadExtractor).Assembly;
-        var version = assembly.GetName().Version?.ToString() ?? "dev";
-        _extractionDir = Path.Combine(Path.GetTempPath(), "Xapper", version);
+        _extractionDir = Path.Combine(Path.GetTempPath(), "Xapper", ComputePayloadHash(assembly));
     }
 
     #endregion
@@ -80,7 +84,8 @@ public sealed class PayloadExtractor
     /// <summary>
     /// 모든 페이로드 리소스를 디스크에 추출합니다.
     /// GenericInjector는 루트 디렉토리에, Inspector는 TFM별 하위 디렉토리에 추출.
-    /// 이미 존재하는 파일은 건너뜁니다.
+    /// 이미 존재하는 파일은 건너뜁니다. 디렉토리 이름 자체가 페이로드 내용의 해시이므로,
+    /// 파일이 있다는 것은 곧 그 내용이 현재 페이로드와 같다는 뜻이다.
     /// </summary>
     /// <exception cref="InvalidOperationException">임베디드 리소스를 찾을 수 없는 경우.</exception>
     public void ExtractAll()
@@ -107,6 +112,42 @@ public sealed class PayloadExtractor
     #endregion
 
     #region Private Methods
+
+    /// <summary>
+    /// 내장된 모든 페이로드 리소스의 이름과 내용으로 짧은 해시를 만듭니다.
+    /// 추출 디렉토리 이름에 쓰이므로, 페이로드가 한 바이트라도 달라지면 다른 디렉토리로 풀린다.
+    /// </summary>
+    /// <param name="assembly">페이로드 리소스를 담고 있는 어셈블리.</param>
+    /// <returns>16자리 16진수 해시 문자열.</returns>
+    /// <exception cref="InvalidOperationException">페이로드 리소스가 하나도 없는 경우.</exception>
+    private static string ComputePayloadHash(System.Reflection.Assembly assembly)
+    {
+        var resourceNames = assembly.GetManifestResourceNames()
+            .Where(name => name.StartsWith(ResourcePrefix, StringComparison.Ordinal))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        if (resourceNames.Length == 0)
+            throw new InvalidOperationException("No embedded payload resources found in assembly.");
+
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[81920];
+
+        foreach (var resourceName in resourceNames)
+        {
+            // 이름도 함께 섞어, 파일 구성이 바뀌는 경우도 해시에 반영되게 한다.
+            hash.AppendData(Encoding.UTF8.GetBytes(resourceName));
+
+            using var stream = assembly.GetManifestResourceStream(resourceName)
+                ?? throw new InvalidOperationException($"Embedded resource '{resourceName}' could not be opened.");
+
+            int read;
+            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                hash.AppendData(buffer, 0, read);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset())[..16];
+    }
 
     /// <summary>
     /// 단일 임베디드 리소스를 디스크에 추출합니다.
