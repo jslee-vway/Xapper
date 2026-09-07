@@ -1,10 +1,16 @@
 <Window x:Class="Xapper.TestApp.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Xapper Test App" Height="350" Width="400"
+        Title="Xapper Test App" Height="520" Width="840"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="20">
-        <StackPanel VerticalAlignment="Center" Width="300">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="320"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- 기존 로그인 폼: 클릭/입력/토글 검증용 -->
+        <StackPanel Grid.Column="0" VerticalAlignment="Center" Width="300">
             <TextBlock Text="Login" FontSize="24" FontWeight="Bold" Margin="0,0,0,20"/>
 
             <TextBlock Text="Username" Margin="0,0,0,5"/>
@@ -22,16 +28,118 @@
                       AutomationProperties.AutomationId="RememberCheckbox"
                       Margin="0,0,0,15"/>
 
-            <Button x:Name="btnLogin"
-                    Content="Log In"
-                    AutomationProperties.AutomationId="LoginButton"
-                    Height="35"
-                    Click="BtnLogin_Click"/>
+            <!-- 로그인 버튼 위에 투명 오버레이를 덮어, 실제 마우스로는 버튼에 닿지 않는 상황을 재현한다.
+                 오버레이는 눈에 보이지 않지만 히트테스트 대상이므로 실제 클릭을 가로챈다. -->
+            <Grid Height="35">
+                <Button x:Name="btnLogin"
+                        Content="Log In"
+                        AutomationProperties.AutomationId="LoginButton"
+                        Click="BtnLogin_Click"/>
+                <Border x:Name="clickBlocker"
+                        AutomationProperties.AutomationId="ClickBlocker"
+                        Background="Transparent"
+                        MouseLeftButtonDown="ClickBlocker_MouseLeftButtonDown"/>
+            </Grid>
 
             <TextBlock x:Name="txtStatus"
                        AutomationProperties.AutomationId="StatusText"
                        Margin="0,10,0,0"
                        Foreground="Green"/>
+
+            <TextBlock x:Name="txtBlockerHits"
+                       AutomationProperties.AutomationId="BlockerHits"
+                       Margin="0,4,0,0"
+                       Foreground="#FF555555"
+                       Text="blocked=0"/>
         </StackPanel>
+
+        <!-- 드래그 검증용 영역 -->
+        <Grid Grid.Column="1" Margin="20,0,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="180"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="140"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Text="Drag Playground" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
+
+            <!-- 시나리오 1: 목록 간 드래그앤드롭 / 시나리오 2: 분할선 끌기 -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="160"/>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <ListBox x:Name="lstSource"
+                         Grid.Column="0"
+                         AutomationProperties.AutomationId="SourceList"
+                         SizeChanged="LstSource_SizeChanged"
+                         PreviewMouseLeftButtonDown="LstSource_PreviewMouseLeftButtonDown"
+                         MouseMove="LstSource_MouseMove">
+                    <ListBoxItem AutomationProperties.AutomationId="ItemAlpha" Content="Alpha"/>
+                    <ListBoxItem AutomationProperties.AutomationId="ItemBravo" Content="Bravo"/>
+                    <ListBoxItem AutomationProperties.AutomationId="ItemCharlie" Content="Charlie"/>
+                </ListBox>
+
+                <GridSplitter x:Name="splitter"
+                              Grid.Column="1"
+                              AutomationProperties.AutomationId="ColumnSplitter"
+                              Width="6"
+                              HorizontalAlignment="Stretch"
+                              Background="#FF9E9E9E"/>
+
+                <ListBox x:Name="lstTarget"
+                         Grid.Column="2"
+                         AutomationProperties.AutomationId="TargetList"
+                         AllowDrop="True"
+                         Background="#FFF3F7FB"
+                         DragOver="LstTarget_DragOver"
+                         Drop="LstTarget_Drop"/>
+            </Grid>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,10">
+                <TextBlock Text="Drop: "/>
+                <TextBlock x:Name="txtDropStatus"
+                           AutomationProperties.AutomationId="DropStatus"
+                           Text="(none)"
+                           FontWeight="Bold"/>
+                <TextBlock Text="   |   SourceList width: "/>
+                <TextBlock x:Name="txtSourceWidth"
+                           AutomationProperties.AutomationId="SourceListWidth"
+                           Text="0"
+                           FontWeight="Bold"/>
+            </StackPanel>
+
+            <!-- 시나리오 3: 캔버스 요소 이동 -->
+            <Canvas x:Name="cnvBoard"
+                    Grid.Row="3"
+                    AutomationProperties.AutomationId="DragBoard"
+                    Background="#FFEFEFEF">
+                <Border x:Name="dragBox"
+                        AutomationProperties.AutomationId="DragBox"
+                        Canvas.Left="10" Canvas.Top="10"
+                        Width="70" Height="45"
+                        Background="#FF4682B4"
+                        MouseLeftButtonDown="DragBox_MouseLeftButtonDown"
+                        MouseMove="DragBox_MouseMove"
+                        MouseLeftButtonUp="DragBox_MouseLeftButtonUp">
+                    <TextBlock Text="Box" Foreground="White"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+            </Canvas>
+
+            <StackPanel Grid.Row="4" Margin="0,8,0,0">
+                <TextBlock x:Name="txtBoxPosition"
+                           AutomationProperties.AutomationId="BoxPosition"
+                           Text="Box: 10,10"/>
+                <TextBlock x:Name="txtDragLog"
+                           AutomationProperties.AutomationId="DragLog"
+                           Foreground="#FF555555"
+                           Text="down=0 move=0 start=0 over=0 drop=0 sel=none"/>
+            </StackPanel>
+        </Grid>
     </Grid>
 </Window>

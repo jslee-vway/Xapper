@@ -115,6 +115,7 @@ public sealed class IpcServer
                 "toggle" => await HandleToggle(message),
                 "expand" => await HandleExpand(message),
                 "scroll" => await HandleScroll(message),
+                "drag" => await HandleDrag(message),
                 "getProperty" => await HandleGetProperty(message),
                 "getBindings" => await HandleGetBindings(message),
                 "screenshot" => await HandleScreenshot(message),
@@ -212,15 +213,17 @@ public sealed class IpcServer
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         await waiter.WaitForReady(element);
 
-        await Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            ClickAction.Execute(element, request.X, request.Y);
-        });
+        var warning = await Application.Current.Dispatcher.InvokeAsync(
+            () => ClickAction.Execute(element, request.X, request.Y));
 
         var posInfo = request.X.HasValue && request.Y.HasValue
             ? $" at ({request.X:F2},{request.Y:F2})"
             : "";
-        var response = new ActionResponse { Success = true, Message = $"Clicked ref={request.Ref}{posInfo}" };
+        var text = $"Clicked ref={request.Ref}{posInfo}";
+        if (warning is not null)
+            text += $" | {warning}";
+
+        var response = new ActionResponse { Success = true, Message = text };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
@@ -329,6 +332,97 @@ public sealed class IpcServer
 
         var response = new ActionResponse { Success = true, Message = $"Scrolled ref={request.Ref}" };
         return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
+    /// 요소 사이 또는 화면 좌표 사이를 마우스 버튼을 누른 채 드래그합니다.
+    /// 좌표 변환과 포그라운드 전환만 UI 스레드에서 수행하고 입력 주입은 UI 스레드 밖에서 실행하여,
+    /// 드래그가 시작된 뒤 대상 앱이 중첩 메시지 루프를 돌 수 있게 한다.
+    /// </summary>
+    private async Task<IpcMessage> HandleDrag(IpcMessage message)
+    {
+        if (message.Payload is null)
+            throw new InvalidOperationException("drag request requires a payload.");
+
+        var request = IpcSerializer.DeserializePayload<DragRequest>(message.Payload.Value);
+        var source = ResolveDragElement(request.SourceRef);
+        var target = ResolveDragElement(request.TargetRef);
+
+        var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
+        if (source is not null)
+            await waiter.WaitForReady(source);
+        if (target is not null)
+            await waiter.WaitForReady(target);
+
+        var endpoints = await Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            var start = ResolveStartPoint(source, request);
+            var end = ResolveEndPoint(target, request, start);
+
+            var anchor = source ?? target;
+            var activated = anchor is null || MouseInput.BringToForeground(anchor);
+
+            return (Start: start, End: end, Activated: activated);
+        });
+
+        await Actions.DragAction.ExecuteAsync(endpoints.Start, endpoints.End);
+
+        var text = $"Dragged ({endpoints.Start.X:F0},{endpoints.Start.Y:F0}) -> ({endpoints.End.X:F0},{endpoints.End.Y:F0})";
+        if (!endpoints.Activated)
+            text += " | WARNING: the target window could not be brought to the foreground. The first input may have " +
+                    "been consumed by window activation, so the drag may not have reached the control. " +
+                    "Bring the window to the front and retry.";
+
+        var response = new ActionResponse { Success = true, Message = text };
+        return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
+    /// 드래그용 참조 번호를 UIElement로 해석합니다. 번호가 지정되지 않았으면 null을 반환합니다.
+    /// </summary>
+    private UIElement? ResolveDragElement(int? elementRef)
+    {
+        if (!elementRef.HasValue)
+            return null;
+
+        var element = _refRegistry.Resolve(elementRef.Value)
+            ?? throw new InvalidOperationException($"Element ref={elementRef} not found. Call snapshot first.");
+
+        return element as UIElement
+            ?? throw new InvalidOperationException($"Element ref={elementRef} ({element.GetType().Name}) is not a UIElement.");
+    }
+
+    /// <summary>
+    /// 드래그 출발 지점을 스크린 좌표로 계산합니다. 요소가 있으면 요소 내 상대 비율, 없으면 화면 좌표로 해석.
+    /// </summary>
+    private static Point ResolveStartPoint(UIElement? source, DragRequest request)
+    {
+        if (source is not null)
+            return MouseInput.ToScreenPoint(source, request.SourceX ?? 0.5, request.SourceY ?? 0.5);
+
+        if (!request.SourceX.HasValue || !request.SourceY.HasValue)
+            throw new InvalidOperationException(
+                "Drag requires sourceRef, or both sourceX and sourceY as screen coordinates.");
+
+        return new Point(request.SourceX.Value, request.SourceY.Value);
+    }
+
+    /// <summary>
+    /// 드래그 도착 지점을 스크린 좌표로 계산합니다. 대상 요소, 출발점 기준 오프셋, 화면 좌표 순으로 해석.
+    /// </summary>
+    private static Point ResolveEndPoint(UIElement? target, DragRequest request, Point start)
+    {
+        if (target is not null)
+            return MouseInput.ToScreenPoint(target, request.TargetX ?? 0.5, request.TargetY ?? 0.5);
+
+        if (request.OffsetX.HasValue || request.OffsetY.HasValue)
+            return new Point(start.X + (request.OffsetX ?? 0), start.Y + (request.OffsetY ?? 0));
+
+        if (!request.TargetX.HasValue || !request.TargetY.HasValue)
+            throw new InvalidOperationException(
+                "Drag requires targetRef, offsetX/offsetY, or both targetX and targetY as screen coordinates.");
+
+        return new Point(request.TargetX.Value, request.TargetY.Value);
     }
 
     /// <summary>

@@ -140,6 +140,24 @@ public sealed class InspectorClient : IAsyncDisposable
         return await SendAsync(request, ct);
     }
 
+    /// <summary>마우스 버튼을 누른 채 두 지점 사이를 드래그합니다.</summary>
+    public async Task<IpcMessage> DragAsync(
+        int? sourceRef = null,
+        double? sourceX = null,
+        double? sourceY = null,
+        int? targetRef = null,
+        double? targetX = null,
+        double? targetY = null,
+        double? offsetX = null,
+        double? offsetY = null,
+        int timeout = 5000,
+        CancellationToken ct = default)
+    {
+        var payload = new { sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, timeout };
+        var request = IpcSerializer.CreateRequest("drag", payload);
+        return await SendAsync(request, ct);
+    }
+
     /// <summary>요소의 프로퍼티 값을 조회합니다.</summary>
     public async Task<IpcMessage> GetPropertyAsync(int @ref, string propertyName, CancellationToken ct = default)
     {

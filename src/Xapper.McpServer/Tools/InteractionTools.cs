@@ -6,7 +6,7 @@ using Xapper.Protocol.Messages.Responses;
 namespace Xapper.McpServer.Tools;
 
 /// <summary>
-/// 선택, 토글, 확장, 스크롤 등 상호작용 MCP 도구를 제공하는 클래스.
+/// 선택, 토글, 확장, 스크롤, 드래그 등 상호작용 MCP 도구를 제공하는 클래스.
 /// </summary>
 [McpServerToolType]
 public sealed class InteractionTools
@@ -64,6 +64,25 @@ public sealed class InteractionTools
     {
         var client = _sessionManager.GetActive();
         var response = await client.ScrollAsync(@ref, horizontalPercent, verticalPercent, timeout, ct);
+        return FormatResponse(response);
+    }
+
+    [McpServerTool(Name = "xapper_drag"), Description("Drag with the left mouse button held down. Three modes: element to element (sourceRef + targetRef), element by pixel offset (sourceRef + offsetX/offsetY), or absolute screen points (sourceX/sourceY + targetX/targetY). For sliders and scrollbars prefer xapper_scroll or setting the value directly; use drag only for real drag-and-drop, splitters, and canvas moves. This tool always sends real mouse input - there is no event-based path, because WPF exposes no accessibility drag pattern. It therefore requires the target window to be in the foreground and takes over the physical cursor. The response carries a WARNING when the window could not be activated, which means the drag may not have reached the control.")]
+    public async Task<string> Drag(
+        [Description("Source element ref from last snapshot. Omit to treat sourceX/sourceY as absolute screen pixels")] int? sourceRef = null,
+        [Description("Start X: relative 0.0-1.0 within the source element (default 0.5), or absolute screen X when sourceRef is omitted")] double? sourceX = null,
+        [Description("Start Y: relative 0.0-1.0 within the source element (default 0.5), or absolute screen Y when sourceRef is omitted")] double? sourceY = null,
+        [Description("Drop target element ref from last snapshot")] int? targetRef = null,
+        [Description("End X: relative 0.0-1.0 within the target element (default 0.5), or absolute screen X when targetRef and offsets are omitted")] double? targetX = null,
+        [Description("End Y: relative 0.0-1.0 within the target element (default 0.5), or absolute screen Y when targetRef and offsets are omitted")] double? targetY = null,
+        [Description("Horizontal pixels to drag from the start point. Used when targetRef is omitted")] double? offsetX = null,
+        [Description("Vertical pixels to drag from the start point. Used when targetRef is omitted")] double? offsetY = null,
+        [Description("Timeout in ms (default 5000)")] int timeout = 5000,
+        CancellationToken ct = default)
+    {
+        var client = _sessionManager.GetActive();
+        var response = await client.DragAsync(
+            sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, timeout, ct);
         return FormatResponse(response);
     }
 

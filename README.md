@@ -129,13 +129,14 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 - 다이얼로그 윈도우 내부 요소도 검색 가능
 
 ### **4. UI 자동 조작**
-- `xapper_click` : 버튼/요소 클릭 (AutomationPeer → RaiseEvent 폴백)
+- `xapper_click` : 버튼/요소 클릭. 좌표를 주지 않으면 AutomationPeer → RaiseEvent 폴백(빠르지만 히트테스트를 건너뛰므로 가려진 요소도 눌림), 좌표를 주면 실제 마우스 입력(사용자와 동일하지만 창이 앞에 있어야 하고 커서를 점유). 요소가 실제 마우스로 닿지 않거나 창 활성화에 실패하면 응답에 경고가 붙는다
   - 상대 좌표 지정 시 SendInput으로 위치 기반 클릭 (듀얼 모니터/DPI 대응)
 - `xapper_type` : TextBox에 텍스트 입력
 - `xapper_select` : ComboBox/ListBox 항목 선택
 - `xapper_toggle` : CheckBox/ToggleButton 토글
 - `xapper_expand` : TreeViewItem/Expander 펼치기/접기
 - `xapper_scroll` : ScrollViewer 스크롤
+- `xapper_drag` : 드래그앤드롭 (요소→요소 / 요소+픽셀 오프셋 / 절대 화면 좌표)
 
 ### **5. 진단 및 검증**
 - `xapper_get_property` : 임의 DependencyProperty 값 읽기
@@ -259,6 +260,7 @@ AI 에이전트가 자동으로 수행하는 흐름:
 | `xapper_toggle` | 토글 | `ref` |
 | `xapper_expand` | 펼치기/접기 | `ref`, `expand` |
 | `xapper_scroll` | 스크롤 | `ref`, `direction`, `amount` |
+| `xapper_drag` | 드래그앤드롭 | `sourceRef`, `targetRef`, `offsetX`/`offsetY`, 화면 좌표 (모두 선택) |
 | `xapper_get_property` | 속성 읽기 | `ref`, `propertyName` |
 | `xapper_get_bindings` | 바인딩 조회 | `ref` |
 | `xapper_screenshot` | 스크린샷 | `ref` (선택) |
