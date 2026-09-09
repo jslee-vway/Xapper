@@ -157,7 +157,7 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 ### **빌드**
 
 ```bash
-git clone https://github.com/KR-JasonLane/Xapper.git
+git clone https://github.com/Conosuke/Xapper.git
 cd Xapper
 dotnet build
 ```
