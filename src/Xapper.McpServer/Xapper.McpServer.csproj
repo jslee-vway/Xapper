@@ -11,6 +11,11 @@
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <!-- 내부 판별 로직을 공개 API로 올리지 않고 테스트에서 검증하기 위함 -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Xapper.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
     <PackageReference Include="ModelContextProtocol" Version="1.2.0" />

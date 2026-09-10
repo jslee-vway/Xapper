@@ -416,7 +416,8 @@ public sealed class IpcServer
 
     /// <summary>
     /// 요소 사이 또는 화면 좌표 사이를 마우스 버튼을 누른 채 드래그합니다.
-    /// 좌표 변환과 포그라운드 전환만 UI 스레드에서 수행하고 입력 주입은 UI 스레드 밖에서 실행하여,
+    /// 시작 지점이 Thumb 이면 그 컨트롤의 드래그 이벤트로 처리해 실제 입력을 쓰지 않는다.
+    /// 그 외에는 좌표 변환과 포그라운드 전환만 UI 스레드에서 수행하고 입력 주입은 UI 스레드 밖에서 실행하여,
     /// 드래그가 시작된 뒤 대상 앱이 중첩 메시지 루프를 돌 수 있게 한다.
     /// </summary>
     private async Task<IpcMessage> HandleDrag(IpcMessage message)
@@ -434,21 +435,43 @@ public sealed class IpcServer
         if (target is not null)
             await waiter.WaitForReady(target);
 
-        var endpoints = await Application.Current.Dispatcher.InvokeAsync(() =>
+        var outcome = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
             var start = ResolveStartPoint(source, request);
             var end = ResolveEndPoint(target, request, start);
 
+            // 스플리터·슬라이더·스크롤바는 Thumb 의 드래그 이벤트로 움직인다. 그 이벤트는 이동량을 숫자로
+            // 받으므로 커서를 옮기지 않고, 실제 마우스보다 오히려 정확하게 조작할 수 있다.
+            if (source is not null && ThumbDrag.FindAt(source, start) is { } thumb)
+            {
+                // 이동량은 반드시 그 Thumb 의 좌표계로 재야 한다. 출발 요소 기준으로 재면 중간에 배율이
+                // 걸려 있을 때(예: Viewbox) 그만큼 어긋난다.
+                var grab = thumb.PointFromScreen(start);
+                ThumbDrag.Perform(thumb, thumb.PointFromScreen(end) - grab, grab);
+                return (Start: start, End: end, Activated: true, UsedThumb: true);
+            }
+
+            // 거절은 창을 앞으로 끌어오기 **전에** 해야 한다. 뒤에 두면 거절된 요청도 포커스를 빼앗는다.
+            if (!request.AllowRealInput)
+                throw new InvalidOperationException(
+                    RealInputRequired.Marker +
+                    " This drag needs real mouse input. Nothing at the start point is a splitter, slider or " +
+                    "scrollbar thumb, and those are the only drags a control will accept as events. Dragging an " +
+                    "item onto a drop target cannot be done any other way either, because Windows decides the " +
+                    "drop location from the physical cursor.");
+
             var anchor = source ?? target;
             var activated = anchor is null || MouseInput.BringToForeground(anchor);
 
-            return (Start: start, End: end, Activated: activated);
+            return (Start: start, End: end, Activated: activated, UsedThumb: false);
         });
 
-        await Actions.DragAction.ExecuteAsync(endpoints.Start, endpoints.End);
+        if (!outcome.UsedThumb)
+            await Actions.DragAction.ExecuteAsync(outcome.Start, outcome.End);
 
-        var text = $"Dragged ({endpoints.Start.X:F0},{endpoints.Start.Y:F0}) -> ({endpoints.End.X:F0},{endpoints.End.Y:F0})";
-        if (!endpoints.Activated)
+        var how = outcome.UsedThumb ? "its own drag events (no real input)" : "real mouse input";
+        var text = $"Dragged ({outcome.Start.X:F0},{outcome.Start.Y:F0}) -> ({outcome.End.X:F0},{outcome.End.Y:F0}) via {how}";
+        if (!outcome.Activated)
             text += " | WARNING: the target window could not be brought to the foreground. The first input may have " +
                     "been consumed by window activation, so the drag may not have reached the control. " +
                     "Bring the window to the front and retry.";

@@ -22,7 +22,8 @@ public static class ClickAction
     private const string UnreachableWarning =
         "WARNING: this element is not reachable by a real mouse click (covered by another element, " +
         "or hit-testing is disabled). The event-based click bypassed hit-testing, so it succeeded " +
-        "where a real user could not. Re-run with x/y to reproduce actual user behavior.";
+        "where a real user could not. Re-running with x/y reproduces actual user behaviour, but that sends real " +
+        "mouse input and the person at the keyboard is asked first.";
 
     /// <summary>대상 창을 활성화하지 못해 입력이 유실될 수 있을 때의 경고.</summary>
     private const string NotForegroundWarning =
