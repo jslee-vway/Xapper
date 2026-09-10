@@ -214,6 +214,14 @@ public sealed class InspectorClient : IAsyncDisposable
         return await SendAsync(request, ct);
     }
 
+    /// <summary>화면 좌표에 있는 요소와 그 조상을 조회합니다.</summary>
+    public async Task<IpcMessage> ElementAtAsync(double x, double y, int maxAncestors = 4, CancellationToken ct = default)
+    {
+        var payload = new { x, y, maxAncestors };
+        var request = IpcSerializer.CreateRequest("elementAt", payload);
+        return await SendAsync(request, ct);
+    }
+
     /// <summary>비주얼 트리에서 조건에 맞는 요소를 검색합니다.</summary>
     public async Task<IpcMessage> FindAsync(string? name = null, string? automationId = null, string? type = null, string? text = null, CancellationToken ct = default)
     {

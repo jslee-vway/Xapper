@@ -22,7 +22,10 @@ public sealed class SnapshotTools
 
     [McpServerTool(Name = "xapper_snapshot"), Description(
         "Get a snapshot of the UI visual tree, assigning a ref to every element it lists except the " +
-        "synthetic Application root that appears when several windows are open. Calling this discards all " +
+        "synthetic Application root, which appears whenever more than one top-level window is open. Popups, " +
+        "context menus, drop-downs and even tooltips are top-level windows of their own, so the root switches " +
+        "between the window itself and that synthetic node depending on what happens to be showing - do not " +
+        "key on the root type. Calling this discards all " +
         "refs handed out earlier, including those from xapper_find, and restarts numbering, so an old ref " +
         "may now point at a different element. Depth is the thing to " +
         "manage: real applications nest deeply and the default of 5 usually stops well above the content, " +

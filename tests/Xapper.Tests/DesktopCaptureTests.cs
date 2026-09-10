@@ -13,6 +13,7 @@ namespace Xapper.Tests;
 /// P/Invoke, DPI 배율, 축소, 알파 채널이 한꺼번에 얽혀 있고 어느 하나가 어긋나도 크기는 멀쩡해 보인다.
 /// 그래서 크기뿐 아니라 실제 픽셀 값까지 확인한다 — 전부 투명한 그림이 크기 검사만으로는 통과했었다.
 /// </summary>
+[Collection(DesktopWindowCollection.Name)]
 public class DesktopCaptureTests
 {
     #region Helpers

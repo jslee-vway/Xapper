@@ -38,7 +38,7 @@ public sealed class TreeWalker
             Type = element.GetType().Name,
             Name = GetName(element),
             AutomationId = GetAutomationId(element),
-            Text = GetText(element),
+            Text = ElementText.Of(element),
             IsEnabled = GetIsEnabled(element),
             IsVisible = GetIsVisible(element),
             Bounds = GetBounds(element)
@@ -64,17 +64,6 @@ public sealed class TreeWalker
     {
         var id = AutomationProperties.GetAutomationId(element);
         return string.IsNullOrEmpty(id) ? null : id;
-    }
-
-    private static string? GetText(DependencyObject element)
-    {
-        return element switch
-        {
-            TextBlock tb => tb.Text,
-            TextBox tb => tb.Text,
-            ContentControl cc when cc.Content is string s => s,
-            _ => null
-        };
     }
 
     private static bool GetIsEnabled(DependencyObject element)

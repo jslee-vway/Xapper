@@ -183,6 +183,7 @@ public sealed class IpcServer
                 "screenshot" => await HandleScreenshot(message),
                 "assert" => await HandleAssert(message),
                 "find" => await HandleFind(message),
+                "elementAt" => await HandleElementAt(message),
                 _ => IpcSerializer.CreateError(message.Id, $"Unknown method: {message.Method}")
             };
         }
@@ -231,14 +232,15 @@ public sealed class IpcServer
             if (root is not null)
                 return _treeWalker.Walk(root, _refRegistry, request.MaxDepth, skipped);
 
-            // 모든 열린 윈도우를 탐색 (다이얼로그 등 별도 Window 포함)
-            var windows = Application.Current.Windows;
-            if (windows.Count == 0)
-                throw new InvalidOperationException("No windows found");
+            // 열려 있는 최상위 창을 모두 순회한다. 다이얼로그뿐 아니라 팝업·메뉴·드롭다운도 여기에 포함된다.
+            var roots = VisualRoots.Sources();
+            if (roots.Count == 0)
+                throw new InvalidOperationException(
+                    "No window of this application is open. It may be starting up or closing.");
 
-            // 윈도우가 1개면 그대로 반환
-            if (windows.Count == 1)
-                return _treeWalker.Walk(windows[0], _refRegistry, request.MaxDepth, skipped);
+            // 창이 하나면 그대로 반환
+            if (roots.Count == 1)
+                return _treeWalker.Walk(roots[0].RootVisual, _refRegistry, request.MaxDepth, skipped);
 
             // 여러 윈도우면 가상 루트 아래에 배치
             var virtualRoot = new ElementSnapshot
@@ -248,9 +250,9 @@ public sealed class IpcServer
                 IsEnabled = true,
                 IsVisible = true
             };
-            foreach (Window window in windows)
+            foreach (var source in roots)
             {
-                virtualRoot.Children.Add(_treeWalker.Walk(window, _refRegistry, request.MaxDepth, skipped));
+                virtualRoot.Children.Add(_treeWalker.Walk(source.RootVisual, _refRegistry, request.MaxDepth, skipped));
             }
             return virtualRoot;
         });
@@ -638,6 +640,53 @@ public sealed class IpcServer
     }
 
     /// <summary>
+    /// 화면 좌표에 실제로 그려져 있는 요소와 그 조상들을 조회합니다.
+    /// 이름도 AutomationId도 없어 검색으로 찾을 수 없는 컨트롤을, 보이는 위치로 지목해 참조를 얻는 길이다.
+    /// 히트테스트만 하므로 커서도 포커스도 건드리지 않는다.
+    /// </summary>
+    private async Task<IpcMessage> HandleElementAt(IpcMessage message)
+    {
+        if (message.Payload is null)
+            throw new InvalidOperationException("elementAt request requires a payload.");
+
+        var request = IpcSerializer.DeserializePayload<ElementAtRequest>(message.Payload.Value);
+
+        var response = await Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            var screenPoint = new Point(request.X, request.Y);
+
+            var source = VisualRoots.SourceAt(screenPoint)
+                ?? throw new InvalidOperationException(
+                    $"No window of this application is on top at ({request.X:F0},{request.Y:F0}). " +
+                    "Another application may be covering that point, or the coordinates may be outside the window. " +
+                    "Take a screenshot with mode=\"screen\" and read the coordinates from it.");
+
+            var elements = VisualRoots.ElementsAt(source, screenPoint, request.MaxAncestors);
+            if (elements.Count == 0)
+                throw new InvalidOperationException(
+                    $"Nothing at ({request.X:F0},{request.Y:F0}) takes hit-testing. The point may be over an " +
+                    "element with no brush behind it, one with IsHitTestVisible off, or the window border " +
+                    "rather than its content.");
+
+            var result = new FindElementResponse();
+            foreach (var element in elements)
+            {
+                result.Matches.Add(new ElementMatch
+                {
+                    Ref = _refRegistry.Register(element),
+                    Type = element.GetType().Name,
+                    Name = (element as FrameworkElement)?.Name,
+                    AutomationId = System.Windows.Automation.AutomationProperties.GetAutomationId(element),
+                    Text = VisualTree.ElementText.Of(element)
+                });
+            }
+            return result;
+        });
+
+        return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
     /// 비주얼 트리에서 조건에 맞는 요소를 검색합니다.
     /// </summary>
     private async Task<IpcMessage> HandleFind(IpcMessage message)
@@ -649,10 +698,10 @@ public sealed class IpcServer
             var finder = new ElementFinder();
             var allResults = new FindElementResponse { Matches = [] };
 
-            // 모든 열린 윈도우에서 검색
-            foreach (Window window in Application.Current.Windows)
+            // 열려 있는 최상위 창을 모두 검색한다. 팝업·메뉴·드롭다운도 각자 최상위 창이라 여기에 포함된다.
+            foreach (var source in VisualRoots.Sources())
             {
-                var result = finder.Find(window, request, _refRegistry);
+                var result = finder.Find(source.RootVisual, request, _refRegistry);
                 allResults.Matches.AddRange(result.Matches);
                 allResults.SkippedNodes.AddRange(result.SkippedNodes);
             }

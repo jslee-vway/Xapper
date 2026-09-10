@@ -122,10 +122,11 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 - `xapper_snapshot` : Visual Tree를 계층적 텍스트로 반환
 - 각 요소에 ref 번호 부여 (이후 조작에 사용)
 - maxDepth 파라미터로 탐색 깊이 제어
-- 다이얼로그 등 별도 Window 포함 모든 열린 윈도우 탐색
+- 다이얼로그는 물론 Popup·ContextMenu·드롭다운까지 열린 최상위 창을 모두 탐색
 - 순회할 수 없는 노드는 그 가지만 건너뛰고 순회를 계속하며, 건너뛴 개수를 헤더에 표시 (위치는 `format="json"`)
 - `rootRef`로 특정 요소부터 부분 탐색. 깊이를 올리면 응답이 지수로 커지므로 전체 깊이를 올리는 대신 부분 탐색을 쓴다
 - 스냅샷은 이전에 발급한 ref를 모두 무효화한다 (검색은 무효화하지 않음)
+- 최상위 창이 둘 이상이면 루트가 가상 `Application` 노드가 된다. 팝업·메뉴·툴팁도 각자 최상위 창이라 무엇이 떠 있느냐에 따라 루트 모양이 바뀐다
 
 ### **3. 요소 검색**
 - `xapper_find` : Name, AutomationId, Type, Text 기반 요소 검색
@@ -133,6 +134,8 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 - 다이얼로그 윈도우 내부 요소도 검색 가능
 - 자식 슬롯이 비어 있는 컨트롤(yFiles, DevExpress 등)을 만나도 검색이 중단되지 않는다. 그 가지만 건너뛰고 찾은 것을 모두 반환하며, 건너뛴 노드의 부모 타입·이름·깊이를 함께 보고
 - `type`은 클래스명 완전 일치, 나머지는 부분 일치, 여러 인자는 AND
+- `xapper_element_at` : 화면 좌표에 그려진 요소와 그 조상을 깊은 것부터 ref와 함께 반환. 이름도 AutomationId도 없는 컨트롤을 스크린샷에서 본 위치로 지목해 ref를 얻는 길이며, 히트테스트라 가려진 것도 정확히 판별하고 커서·포커스를 건드리지 않는다
+- 검색·스냅샷은 열린 최상위 창을 모두 순회하므로 **Popup·ContextMenu·드롭다운 안의 항목도 보인다**
 
 ### **4. UI 자동 조작**
 - `xapper_click` : 버튼/요소 클릭. 좌표를 주지 않으면 AutomationPeer → RaiseEvent 폴백(빠르지만 히트테스트를 건너뛰므로 가려진 요소도 눌림), 좌표를 주면 실제 마우스 입력(사용자와 동일하지만 창이 앞에 있어야 하고 커서를 점유). 요소가 실제 마우스로 닿지 않거나 창 활성화에 실패하면 응답에 경고가 붙는다. 어느 경로로 눌렀는지(접근성 패턴 / 실제 마우스 입력)가 표시되며, 접근성 경로는 큐에 걸린 조작이 처리될 때까지 기다렸다가 반환하며, 제한 시간을 넘기면 아직 처리 중이라고 알린다
@@ -264,6 +267,7 @@ AI 에이전트가 자동으로 수행하는 흐름:
 | `xapper_detach` | 연결 해제 | - |
 | `xapper_snapshot` | UI 트리 스냅샷 | `maxDepth` |
 | `xapper_find` | 요소 검색 | `name`, `automationId`, `type`, `text` |
+| `xapper_element_at` | 좌표의 요소 조회 | `x`, `y`, `maxAncestors` (선택) |
 | `xapper_click` | 클릭 (좌표 지정 가능) | `ref`, `x`, `y` (선택) |
 | `xapper_type` | 텍스트 입력 | `ref`, `text` |
 | `xapper_select` | 항목 선택 | `ref`, `item` |

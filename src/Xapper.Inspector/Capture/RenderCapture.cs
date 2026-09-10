@@ -47,12 +47,36 @@ public static class RenderCapture
         using var memoryStream = new MemoryStream();
         encoder.Save(memoryStream);
 
+        var origin = ScreenOriginOf(element);
+
         return new ScreenshotResponse
         {
             Base64Png = Convert.ToBase64String(memoryStream.ToArray()),
             Width = renderBitmap.PixelWidth,
-            Height = renderBitmap.PixelHeight
+            Height = renderBitmap.PixelHeight,
+            OriginX = origin?.X,
+            OriginY = origin?.Y,
+            Scale = scale
         };
+    }
+
+    /// <summary>
+    /// 그려진 영역의 왼쪽 위가 화면 어디인지 구합니다.
+    /// 화면에 붙어 있지 않은 요소는 화면 좌표를 가질 수 없으므로 null.
+    /// </summary>
+    private static Point? ScreenOriginOf(UIElement element)
+    {
+        if (PresentationSource.FromVisual(element) is null)
+            return null;
+
+        try
+        {
+            return element.PointToScreen(new Point(0, 0));
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>

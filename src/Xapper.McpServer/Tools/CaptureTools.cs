@@ -73,6 +73,7 @@ public sealed class CaptureTools
         var png = Convert.FromBase64String(result.Base64Png);
 
         var summary = $"Screenshot captured: {result.Width}x{result.Height} pixels";
+        summary += MapToScreen(result);
         if (result.Warning is not null)
             summary += $"\nWARNING: {result.Warning}";
         if (savePath is not null)
@@ -88,6 +89,21 @@ public sealed class CaptureTools
     #endregion
 
     #region Private Methods
+
+    /// <summary>
+    /// 그림의 픽셀을 화면 좌표로 되돌리는 방법을 설명합니다.
+    /// 캡처는 화면 전체가 아니라 창이 놓인 영역의 일부이고 축소까지 되므로,
+    /// 이 값 없이는 그림에서 읽은 위치를 xapper_element_at 에 그대로 넣을 수 없다.
+    /// </summary>
+    private static string MapToScreen(ScreenshotResponse result)
+    {
+        if (result.OriginX is not { } originX || result.OriginY is not { } originY)
+            return "";
+
+        return $"\nImage pixel (0,0) is screen ({originX:F0},{originY:F0}) and the image is scaled by " +
+               $"{result.Scale:0.###}. To turn an image position into a screen position for " +
+               $"xapper_element_at: screen = origin + image / scale.";
+    }
 
     /// <summary>
     /// PNG를 지정된 경로에 저장하고 그 결과를 한 줄로 설명합니다.

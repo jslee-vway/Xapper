@@ -69,10 +69,25 @@ internal static class VisualChildren
     /// </summary>
     private static string Describe(DependencyObject parent, int depth, int? index, string reason)
     {
-        var name = (parent as FrameworkElement)?.Name;
-        var namePart = string.IsNullOrEmpty(name) ? "" : $" name=\"{name}\"";
         var indexPart = index.HasValue ? $" child[{index}]" : "";
-        return $"{parent.GetType().Name}{namePart} depth={depth}{indexPart}: {reason}";
+        return $"{parent.GetType().Name}{NamePartOf(parent)} depth={depth}{indexPart}: {reason}";
+    }
+
+    /// <summary>
+    /// 설명에 붙일 이름을 읽습니다. 이름은 의존 속성이라 문제가 된 노드에서는 읽는 것 자체가 실패할 수 있다.
+    /// 건너뛴 이유를 알리려다 새 예외를 내면, 한 노드를 감싸려던 장치가 순회 전체를 무너뜨린다.
+    /// </summary>
+    private static string NamePartOf(DependencyObject parent)
+    {
+        try
+        {
+            var name = (parent as FrameworkElement)?.Name;
+            return string.IsNullOrEmpty(name) ? "" : $" name=\"{name}\"";
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     #endregion

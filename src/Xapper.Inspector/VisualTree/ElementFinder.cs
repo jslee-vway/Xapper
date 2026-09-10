@@ -42,7 +42,7 @@ public sealed class ElementFinder
                 Type = element.GetType().Name,
                 Name = (element as FrameworkElement)?.Name,
                 AutomationId = AutomationProperties.GetAutomationId(element),
-                Text = GetText(element)
+                Text = ElementText.Of(element)
             });
         }
 
@@ -76,23 +76,12 @@ public sealed class ElementFinder
 
         if (request.Text != null)
         {
-            var text = GetText(element);
+            var text = ElementText.Of(element);
             if (text == null || !text.Contains(request.Text, StringComparison.OrdinalIgnoreCase))
                 return false;
         }
 
         return true;
-    }
-
-    private static string? GetText(DependencyObject element)
-    {
-        return element switch
-        {
-            TextBlock tb => tb.Text,
-            TextBox tb => tb.Text,
-            ContentControl cc when cc.Content is string s => s,
-            _ => null
-        };
     }
 
     #endregion

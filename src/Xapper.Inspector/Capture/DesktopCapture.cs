@@ -39,6 +39,12 @@ public static class DesktopCapture
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsIconic(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+
+    /// <summary>창이 속한 최상위 창을 구하는 GetAncestor 플래그.</summary>
+    private const uint GA_ROOT = 2;
+
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
 
@@ -163,19 +169,21 @@ public static class DesktopCapture
     #region Private Methods
 
     /// <summary>
-    /// 이 UI 스레드가 소유한, 화면에 보이는 최상위 창 핸들을 열거합니다.
+    /// 화면에 보이는 최상위 창 핸들을 열거합니다.
     /// WPF는 팝업과 메뉴도 각자 HwndSource로 띄우므로 Window 목록으로는 이들을 볼 수 없다.
-    /// 최소화된 창은 화면 밖 좌표를 돌려주므로 제외한다.
+    /// 다만 입력 소스 중에는 다른 창 안에 얹힌 자식 창도 있어, 그것까지 세면 "다른 창이 N개 열려 있다"는
+    /// 경고가 부풀고 사용자가 없는 창을 찾게 된다. 최소화된 창은 화면 밖 좌표를 돌려주므로 함께 제외한다.
     /// </summary>
     private static IEnumerable<IntPtr> TopLevelWindowHandles()
     {
-        foreach (PresentationSource source in PresentationSource.CurrentSources)
+        foreach (var source in VisualTree.VisualRoots.Sources())
         {
-            if (source is not HwndSource hwndSource || hwndSource.IsDisposed)
+            var handle = source.Handle;
+
+            if (GetAncestor(handle, GA_ROOT) != handle)
                 continue;
 
-            var handle = hwndSource.Handle;
-            if (handle == IntPtr.Zero || !IsWindowVisible(handle) || IsIconic(handle))
+            if (!IsWindowVisible(handle) || IsIconic(handle))
                 continue;
 
             yield return handle;
@@ -238,7 +246,11 @@ public static class DesktopCapture
 
             CopyScreenInto(memoryDc, bitmap, region, targetWidth, targetHeight);
 
-            return Encode(bitmap, targetWidth, targetHeight);
+            var response = Encode(bitmap, targetWidth, targetHeight);
+            response.OriginX = region.X;
+            response.OriginY = region.Y;
+            response.Scale = scale;
+            return response;
         }
         finally
         {
