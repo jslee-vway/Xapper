@@ -19,7 +19,14 @@ public sealed class FindTools
         _sessionManager = sessionManager;
     }
 
-    [McpServerTool(Name = "xapper_find"), Description("Find elements by name, automationId, type, or text content (returns matching refs)")]
+    [McpServerTool(Name = "xapper_find"), Description(
+        "Find elements by name, automationId, type, or text content, returning a ref for each match. " +
+        "type must equal the control's exact class name, ignoring case: a TreeView-derived control named " +
+        "TreeViewControl is not matched by 'TreeView'. Take the name from a snapshot rather than guessing it. " +
+        "name, automationId and text match on substrings. Supplying several criteria narrows the result - an " +
+        "element must satisfy all of them - and supplying none is an error. Searching walks every open window " +
+        "to full depth, and reports any node it could not traverse instead of abandoning the search. Unlike " +
+        "xapper_snapshot this does not invalidate refs you already hold; it only hands out new numbers.")]
     public async Task<string> Find(
         [Description("Element x:Name to search for (partial match)")] string? name = null,
         [Description("AutomationProperties.AutomationId to search for (partial match)")] string? automationId = null,

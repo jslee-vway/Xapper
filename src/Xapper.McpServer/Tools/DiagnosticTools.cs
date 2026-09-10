@@ -20,7 +20,11 @@ public sealed class DiagnosticTools
         _sessionManager = sessionManager;
     }
 
-    [McpServerTool(Name = "xapper_get_property"), Description("Get a specific property value of an element")]
+    [McpServerTool(Name = "xapper_get_property"), Description(
+        "Get a single property value of an element. The name must be one dependency property or public " +
+        "instance property of that exact control type; property paths such as 'ItemsSource.Count' are not " +
+        "resolved and are reported as such. To reach into a value, read the property itself and inspect the " +
+        "result, or find the child elements with xapper_find.")]
     public async Task<string> GetProperty(
         [Description("Element ref from last snapshot")] int @ref,
         [Description("Property name (e.g., 'Text', 'IsEnabled', 'Visibility', 'Content')")] string propertyName,

@@ -27,13 +27,25 @@ public sealed class ActionTools
         "do - but it requires the target window to be in the foreground and it takes over the physical cursor, " +
         "interrupting the human operator. Default to the event mode for routine steps, and switch to x/y when " +
         "the point of the test IS that a user can physically reach the control, or when the response warns that " +
-        "the element is not reachable. The response carries a WARNING when the element is unreachable by a real " +
-        "mouse, or when the window could not be activated.")]
+        "the element is not reachable. What the event mode does depends on the element, and the response names " +
+        "the path it took - check it when a click appears to do nothing. A control with an accessibility " +
+        "pattern is invoked or toggled through it, and a ButtonBase-derived control whose peer offers neither " +
+        "has its click event raised instead; neither produces any mouse event. Everything else falls back to " +
+        "four simulated routed events, which do reach " +
+        "MouseLeftButtonDown/Up handlers, but only the Left-specific ones - a handler on MouseDown, MouseUp or " +
+        "PreviewMouseDown still never runs, and there is no hit-test, no mouse capture and no real device " +
+        "state behind them. Use x/y when the element depends on any of that. The Invoke and Toggle paths queue " +
+        "their work on the UI thread rather than running it inline, so this call waits for that queue to drain " +
+        "before " +
+        "answering; when it returns the application has processed the click, unless the response says it was " +
+        "still busy. There is no double-click: two coordinate clicks in a row may not register as one, " +
+        "because the interval between calls exceeds the system double-click time. The response also warns " +
+        "when the element is unreachable by a real mouse, or when the window could not be activated.")]
     public async Task<string> Click(
         [Description("Element ref from last snapshot")] int @ref,
         [Description("Relative X position within element (0.0=left, 1.0=right). Omit for event-based click.")] double? x = null,
         [Description("Relative Y position within element (0.0=top, 1.0=bottom). Omit for event-based click.")] double? y = null,
-        [Description("Timeout in ms to wait for element readiness (default 5000)")] int timeout = 5000,
+        [Description("Timeout in ms (default 5000). Spent twice - first waiting for the element to be ready, then bounding the wait for the click to be processed - so the worst case is about double this value")] int timeout = 5000,
         CancellationToken ct = default)
     {
         var client = _sessionManager.GetActive();

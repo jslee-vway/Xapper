@@ -8,7 +8,8 @@ namespace Xapper.Inspector.VisualTree;
 
 /// <summary>
 /// 비주얼 트리를 깊이 우선 탐색하여 조건에 매칭되는 UI 요소를 검색하는 클래스.
-/// 모든 검색 조건은 부분 매칭이며 대소문자를 무시.
+/// 타입은 클래스명 완전 일치, 이름·AutomationId·텍스트는 부분 일치이며 모두 대소문자를 무시.
+/// 조건을 여러 개 주면 모두 만족하는 요소만 매칭.
 /// </summary>
 public sealed class ElementFinder
 {

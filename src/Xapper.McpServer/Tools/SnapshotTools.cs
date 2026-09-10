@@ -20,9 +20,17 @@ public sealed class SnapshotTools
         _sessionManager = sessionManager;
     }
 
-    [McpServerTool(Name = "xapper_snapshot"), Description("Get a snapshot of the UI visual tree with element refs for subsequent actions")]
+    [McpServerTool(Name = "xapper_snapshot"), Description(
+        "Get a snapshot of the UI visual tree, assigning a ref to every element it lists except the " +
+        "synthetic Application root that appears when several windows are open. Calling this discards all " +
+        "refs handed out earlier, including those from xapper_find, and restarts numbering, so an old ref " +
+        "may now point at a different element. Depth is the thing to " +
+        "manage: real applications nest deeply and the default of 5 usually stops well above the content, " +
+        "while raising it grows the response exponentially and can exceed what the transport carries. " +
+        "Rather than raising maxDepth across the whole window, locate a container with xapper_find or a " +
+        "shallow snapshot, then pass its ref as rootRef to expand that subtree alone.")]
     public async Task<string> Snapshot(
-        [Description("Root element ref to snapshot from (omit for full window)")] int? rootRef = null,
+        [Description("Ref to start from, taken from the previous snapshot or from xapper_find (omit for the whole window)")] int? rootRef = null,
         [Description("Max depth to traverse (default 5)")] int maxDepth = 5,
         [Description("Output format: 'text' (compact) or 'json' (structured)")] string format = "text",
         CancellationToken ct = default)
