@@ -98,9 +98,25 @@ public sealed class IpcServer
 
             var response = await ProcessMessage(message);
             var responseBytes = IpcSerializer.Serialize(response);
+
+            // 상한을 넘는 프레임은 수신 측이 거부하고, 그 시점에는 이미 연결이 어긋나 세션이 끝난다.
+            // 보내기 전에 잡아 무엇을 어떻게 줄이면 되는지 알려주는 오류로 바꾼다.
+            if (responseBytes.Length > IpcSerializer.MaxPayloadBytes)
+                responseBytes = IpcSerializer.Serialize(TooLargeError(message.Id, responseBytes.Length));
+
             await pipe.WriteAsync(responseBytes, ct);
             await pipe.FlushAsync(ct);
         }
+    }
+
+    /// <summary>
+    /// 응답이 전송 상한을 넘었을 때 무엇을 줄여야 하는지 알려주는 오류를 만듭니다.
+    /// </summary>
+    private static IpcMessage TooLargeError(string id, int actualBytes)
+    {
+        return IpcSerializer.CreateError(id,
+            $"Response is too large to send ({actualBytes} bytes; limit {IpcSerializer.MaxPayloadBytes}). " +
+            "Request a smaller result: pass maxWidth to shrink a screenshot, or lower maxDepth for a snapshot.");
     }
 
     /// <summary>
@@ -486,9 +502,9 @@ public sealed class IpcServer
             {
                 var element = _refRegistry.Resolve(request.Ref.Value) as UIElement
                     ?? throw new InvalidOperationException($"Element ref={request.Ref} not found or not a UIElement.");
-                return ScreenshotCapture.CaptureElement(element);
+                return ScreenshotCapture.CaptureElement(element, request.MaxWidth);
             }
-            return ScreenshotCapture.CaptureWindow();
+            return ScreenshotCapture.CaptureWindow(maxWidth: request.MaxWidth);
         });
 
         return IpcSerializer.CreateResponse(message.Id, response);

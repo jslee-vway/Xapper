@@ -14,6 +14,9 @@ public static class IpcSerializer
 {
     #region Fields
 
+    /// <summary>한 메시지가 가질 수 있는 최대 페이로드 바이트 수. 이보다 큰 프레임은 수신 측에서 거부된다.</summary>
+    public const int MaxPayloadBytes = 10 * 1024 * 1024;
+
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -68,7 +71,7 @@ public static class IpcSerializer
         await stream.ReadExactlyAsync(lengthBuffer, ct);
         var length = BitConverter.ToInt32(lengthBuffer);
 
-        if (length <= 0 || length > 10 * 1024 * 1024)
+        if (length <= 0 || length > MaxPayloadBytes)
             throw new InvalidOperationException($"Invalid message length: {length}");
 
         var jsonBuffer = new byte[length];

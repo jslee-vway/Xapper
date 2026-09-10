@@ -144,7 +144,9 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 ### **5. 진단 및 검증**
 - `xapper_get_property` : 임의 DependencyProperty 값 읽기
 - `xapper_get_bindings` : 데이터 바인딩 상태 및 오류 조회
-- `xapper_screenshot` : 윈도우/요소 캡처 (base64 PNG)
+- `xapper_screenshot` : 윈도우/요소 캡처. 그림을 MCP 이미지 콘텐츠로 그대로 반환하므로 호출자가 화면을 직접 볼 수 있다
+- `maxWidth`로 비율을 유지한 채 축소, `savePath`로 PNG를 파일에 함께 저장 (저장 실패는 경고로 알리고 그림은 그대로 반환)
+- 보고되는 크기는 실제 인코딩된 픽셀 수
 - `xapper_assert` : 속성 값 단언 (PASS/FAIL 반환)
 
 <br/>
@@ -266,7 +268,7 @@ AI 에이전트가 자동으로 수행하는 흐름:
 | `xapper_drag` | 드래그앤드롭 | `sourceRef`, `targetRef`, `offsetX`/`offsetY`, 화면 좌표 (모두 선택) |
 | `xapper_get_property` | 속성 읽기 | `ref`, `propertyName` |
 | `xapper_get_bindings` | 바인딩 조회 | `ref` |
-| `xapper_screenshot` | 스크린샷 | `ref` (선택) |
+| `xapper_screenshot` | 스크린샷 (이미지 반환) | `ref`, `maxWidth`, `savePath` (모두 선택) |
 | `xapper_assert` | 값 단언 | `ref`, `propertyName`, `operator`, `expected` |
 
 <br/>
