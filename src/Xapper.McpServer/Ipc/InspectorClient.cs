@@ -199,9 +199,9 @@ public sealed class InspectorClient : IAsyncDisposable
     }
 
     /// <summary>윈도우 또는 요소의 스크린샷을 캡처합니다.</summary>
-    public async Task<IpcMessage> ScreenshotAsync(int? @ref = null, int? maxWidth = null, CancellationToken ct = default)
+    public async Task<IpcMessage> ScreenshotAsync(int? @ref = null, int? maxWidth = null, string? mode = null, CancellationToken ct = default)
     {
-        var payload = new { @ref, maxWidth };
+        var payload = new { @ref, maxWidth, mode };
         var request = IpcSerializer.CreateRequest("screenshot", payload);
         return await SendAsync(request, ct);
     }

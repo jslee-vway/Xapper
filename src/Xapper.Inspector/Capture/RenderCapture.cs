@@ -7,9 +7,11 @@ using Xapper.Protocol.Messages.Responses;
 namespace Xapper.Inspector.Capture;
 
 /// <summary>
-/// WPF 윈도우 또는 개별 UI 요소를 RenderTargetBitmap으로 캡처하여 Base64 PNG로 변환하는 유틸리티 클래스.
+/// WPF 윈도우 또는 개별 UI 요소를 RenderTargetBitmap으로 다시 그려 Base64 PNG로 변환하는 유틸리티 클래스.
+/// 시각 트리 하나만 그리므로 창이 가려져 있어도 찍히지만, 별도 창·팝업·컨텍스트 메뉴·드롭다운처럼
+/// 자기 HWND에 사는 것은 담기지 않는다. 그런 것까지 필요하면 <see cref="DesktopCapture"/>를 쓴다.
 /// </summary>
-public static class ScreenshotCapture
+public static class RenderCapture
 {
     /// <summary>
     /// 지정된 UI 요소를 네이티브 DPI로 렌더링하여 Base64 PNG 스크린샷을 반환합니다.

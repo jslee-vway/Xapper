@@ -549,18 +549,66 @@ public sealed class IpcServer
 
         var response = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
-            if (request.Ref.HasValue)
-            {
-                var element = ResolveRef(request.Ref.Value) as UIElement
+            var element = request.Ref.HasValue
+                ? ResolveRef(request.Ref.Value) as UIElement
                     ?? throw new InvalidOperationException(
                         $"Element ref={request.Ref} cannot be captured because it is not a UIElement. " +
-                        "Pick an element that renders, or omit ref to capture the whole window.");
-                return ScreenshotCapture.CaptureElement(element, request.MaxWidth);
-            }
-            return ScreenshotCapture.CaptureWindow(maxWidth: request.MaxWidth);
+                        "Pick an element that renders, or omit ref to capture the whole window.")
+                : null;
+
+            var mode = string.IsNullOrWhiteSpace(request.Mode) ? ScreenshotModes.Render : request.Mode.Trim();
+
+            if (mode.Equals(ScreenshotModes.Screen, StringComparison.OrdinalIgnoreCase))
+                return CaptureFromScreen(element, request.MaxWidth);
+
+            if (mode.Equals(ScreenshotModes.Render, StringComparison.OrdinalIgnoreCase))
+                return CaptureByRendering(element, request.MaxWidth);
+
+            throw new InvalidOperationException(
+                $"Unknown screenshot mode \"{mode}\". Use \"{ScreenshotModes.Render}\" to redraw the visual " +
+                $"tree, or \"{ScreenshotModes.Screen}\" to read what is on the desktop.");
         });
 
         return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
+    /// 시각 트리를 다시 그려 캡처합니다. 다른 창이 열려 있으면 이 그림에 담기지 않았다는 사실을 함께 알립니다.
+    /// </summary>
+    private static ScreenshotResponse CaptureByRendering(UIElement? element, int? maxWidth)
+    {
+        var response = element is not null
+            ? RenderCapture.CaptureElement(element, maxWidth)
+            : RenderCapture.CaptureWindow(maxWidth: maxWidth);
+
+        // 렌더 방식은 시각 트리 하나만 그린다. 별도 창은 물론이고 팝업·메뉴·드롭다운도 자기 HWND에 살아 담기지 않는다.
+        // 그래서 Window 목록이 아니라 최상위 창 개수로 센다 — 팝업은 Window가 아니라서 그 목록에 나타나지 않는다.
+        var otherWindows = DesktopCapture.CountVisibleWindows() - 1;
+        if (otherWindows > 0)
+            response.Warning =
+                $"{otherWindows} other window(s) are open and are not in this image. Popups, context menus and " +
+                $"drop-downs are never in it either. Use mode=\"{ScreenshotModes.Screen}\" to capture what is " +
+                "actually on the desktop.";
+
+        return response;
+    }
+
+    /// <summary>
+    /// 화면에 합성된 픽셀을 그대로 읽어 캡처합니다. 대상 창이 앞에 없으면 다른 창이 덮였을 수 있다고 알립니다.
+    /// </summary>
+    private static ScreenshotResponse CaptureFromScreen(UIElement? element, int? maxWidth)
+    {
+        var response = element is not null
+            ? DesktopCapture.CaptureElement(element, maxWidth)
+            : DesktopCapture.CaptureApplicationWindows(maxWidth);
+
+        if (!DesktopCapture.IsAnyWindowInForeground())
+            response.Warning =
+                "None of the application's windows is in the foreground, so another application may be covering " +
+                "the captured region in this image. Bring the window to the front and capture again, or use " +
+                $"mode=\"{ScreenshotModes.Render}\", which does not depend on what is on screen.";
+
+        return response;
     }
 
     /// <summary>

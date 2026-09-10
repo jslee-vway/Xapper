@@ -43,18 +43,28 @@ public sealed class CaptureTools
     /// <param name="savePath">PNG를 추가로 저장할 절대 경로. 생략하면 저장하지 않음.</param>
     /// <param name="ct">취소 토큰.</param>
     /// <returns>요약 텍스트와 PNG 이미지 콘텐츠.</returns>
-    [McpServerTool(Name = "xapper_screenshot"), Description("Capture the window or a single element and return the image itself, so it can be viewed directly")]
+    [McpServerTool(Name = "xapper_screenshot"), Description(
+        "Capture the window or a single element and return the image itself, so it can be viewed directly. " +
+        "The mode decides where the pixels come from and the two are not interchangeable. \"render\" (the " +
+        "default) redraws the application's own visual tree: it works while the window sits behind another " +
+        "application or has no focus, and nothing foreign can appear in it - but it draws one visual tree, so " +
+        "a dialog in its own window, a popup, a context menu or a combo-box drop-down is simply absent, and " +
+        "the response says so when other windows are open. \"screen\" reads the pixels already composited on " +
+        "the desktop, so everything a person can see is there, popups included; in exchange it shows whatever " +
+        "is on top, and the response warns when none of the application's windows is in front. Reach for " +
+        "\"screen\" whenever a dialog or menu is open, or when you need to see what the user sees.")]
     public async Task<IEnumerable<ContentBlock>> Screenshot(
         [Description("Element ref to capture (omit for the whole window)")] int? @ref = null,
         [Description("Shrink to at most this many pixels wide, keeping the aspect ratio (omit for full size)")] int? maxWidth = null,
         [Description("Absolute path to also write the PNG to (omit to skip saving)")] string? savePath = null,
+        [Description("Where the pixels come from: 'render' (default, redraws the app) or 'screen' (reads the desktop, includes popups)")] string mode = "render",
         CancellationToken ct = default)
     {
         if (maxWidth is <= 0)
             return [new TextContentBlock { Text = "Error: maxWidth must be greater than 0. Omit it to get the image at full size." }];
 
         var client = _sessionManager.GetActive();
-        var response = await client.ScreenshotAsync(@ref, maxWidth, ct);
+        var response = await client.ScreenshotAsync(@ref, maxWidth, mode, ct);
 
         if (response.Type == "error")
             return [new TextContentBlock { Text = $"Error: {response.Payload}" }];
@@ -63,6 +73,8 @@ public sealed class CaptureTools
         var png = Convert.FromBase64String(result.Base64Png);
 
         var summary = $"Screenshot captured: {result.Width}x{result.Height} pixels";
+        if (result.Warning is not null)
+            summary += $"\nWARNING: {result.Warning}";
         if (savePath is not null)
             summary += await SaveAsync(png, savePath, ct);
 

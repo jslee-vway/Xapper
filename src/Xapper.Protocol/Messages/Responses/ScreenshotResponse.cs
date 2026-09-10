@@ -13,4 +13,7 @@ public sealed class ScreenshotResponse
 
     /// <summary>인코딩된 이미지의 실제 세로 픽셀 수. 축소가 적용되면 축소 후 값.</summary>
     public int Height { get; set; }
+
+    /// <summary>이 그림이 화면과 다를 수 있는 이유. 문제가 없으면 null.</summary>
+    public string? Warning { get; set; }
 }
