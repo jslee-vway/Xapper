@@ -18,7 +18,7 @@ public static class DragAction
     /// <summary>이동 입력 사이 간격 (밀리초). 대상 앱이 메시지를 펌프할 여유를 준다.</summary>
     private const int StepDelayMs = 16;
 
-    /// <summary>버튼을 누른 직후와 떼기 직전의 안정화 대기 (밀리초).</summary>
+    /// <summary>버튼을 누른 직후, 떼기 직전, 뗀 직후의 안정화 대기 (밀리초).</summary>
     private const int SettleDelayMs = 60;
 
     #endregion
@@ -54,6 +54,10 @@ public static class DragAction
         await Task.Delay(SettleDelayMs);
 
         MouseInput.LeftUp(endScreenPoint);
+
+        // 버튼을 뗀 입력이 대상 스레드의 메시지 큐에 실릴 때까지 기다린다.
+        // 이것이 없으면 호출자가 드롭 처리 전에 응답을 받아, 뒤이은 대기가 아무것도 보장하지 못한다.
+        await Task.Delay(SettleDelayMs);
     }
 
     #endregion

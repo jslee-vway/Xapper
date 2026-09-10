@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Threading;
 using Xapper.Protocol;
 using Xapper.Protocol.Messages.Requests;
 using Xapper.Protocol.Messages.Responses;
@@ -110,6 +111,46 @@ public sealed class IpcServer
     }
 
     /// <summary>
+    /// 조작이 처리될 때까지 기다린 뒤 결과 메시지를 돌려줍니다.
+    /// 접근성 경로는 조작을 큐에 걸어 두고 곧바로 돌아오므로, 기다리지 않으면 호출자의 다음 호출이
+    /// 조작 이전 상태를 보게 된다. 제한 시간 안에 끝나지 않으면 그 사실을 메시지에 적어 알린다.
+    /// </summary>
+    /// <param name="message">조작 결과 메시지.</param>
+    /// <param name="timeoutMs">기다릴 최대 시간 (밀리초).</param>
+    /// <returns>필요하면 안내가 덧붙은 결과 메시지.</returns>
+    private static async Task<string> SettleAsync(string message, int timeoutMs)
+    {
+        // 조작이 앱을 닫았을 수 있다. 그 경우 기다릴 UI 작업 자체가 남아 있지 않다.
+        var application = Application.Current;
+        if (application is null)
+            return message;
+
+        var settled = await AutoWait.DispatcherDrain.WaitAsync(
+            application.Dispatcher, TimeSpan.FromMilliseconds(timeoutMs));
+
+        return settled
+            ? message
+            : message + $" | NOTE: the application was still busy after {timeoutMs} ms, so it may not have " +
+              "finished processing this action. Re-read the state before deciding whether it took effect.";
+    }
+
+    /// <summary>
+    /// 참조 번호를 요소로 해석합니다. 사라진 번호에는 왜 사라졌고 무엇을 해야 하는지 알려주는 오류를 냅니다.
+    /// </summary>
+    /// <param name="elementRef">해석할 참조 번호.</param>
+    /// <returns>해당 요소.</returns>
+    /// <exception cref="InvalidOperationException">번호가 더 이상 유효하지 않은 경우.</exception>
+    private DependencyObject ResolveRef(int elementRef)
+    {
+        return _refRegistry.Resolve(elementRef)
+            ?? throw new InvalidOperationException(
+                $"Element ref={elementRef} cannot be resolved. Either xapper_snapshot ran after you obtained it " +
+                "- that discards every earlier ref - or the element has since left the visual tree, which " +
+                "happens to virtualized rows and closed dialogs. Take a fresh snapshot and use a ref from it. " +
+                "xapper_find does not discard refs.");
+    }
+
+    /// <summary>
     /// 응답이 전송 상한을 넘었을 때 무엇을 줄여야 하는지 알려주는 오류를 만듭니다.
     /// </summary>
     private static IpcMessage TooLargeError(string id, int actualBytes)
@@ -181,15 +222,14 @@ public sealed class IpcServer
 
         var snapshot = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
+            // 참조는 레지스트리를 비우기 전에 해석해야 한다.
+            // 순서가 뒤바뀌면 방금 돌려받은 번호까지 반드시 사라져 rootRef를 쓸 수 없다.
+            var root = request.RootRef.HasValue ? ResolveRef(request.RootRef.Value) : null;
+
             _refRegistry.Clear();
 
-            // 특정 요소가 지정된 경우 그 요소부터 탐색
-            if (request.RootRef.HasValue)
-            {
-                var root = _refRegistry.Resolve(request.RootRef.Value)
-                    ?? throw new InvalidOperationException($"Element ref={request.RootRef} not found");
+            if (root is not null)
                 return _treeWalker.Walk(root, _refRegistry, request.MaxDepth, skipped);
-            }
 
             // 모든 열린 윈도우를 탐색 (다이얼로그 등 별도 Window 포함)
             var windows = Application.Current.Windows;
@@ -231,23 +271,22 @@ public sealed class IpcServer
     {
         var request = IpcSerializer.DeserializePayload<ClickRequest>(message.Payload!.Value);
 
-        var element = _refRegistry.Resolve(request.Ref)
-            ?? throw new InvalidOperationException($"Element ref={request.Ref} not found. Call snapshot first.");
+        var element = ResolveRef(request.Ref);
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         await waiter.WaitForReady(element);
 
-        var warning = await Application.Current.Dispatcher.InvokeAsync(
+        var outcome = await Application.Current.Dispatcher.InvokeAsync(
             () => ClickAction.Execute(element, request.X, request.Y));
 
         var posInfo = request.X.HasValue && request.Y.HasValue
             ? $" at ({request.X:F2},{request.Y:F2})"
             : "";
-        var text = $"Clicked ref={request.Ref}{posInfo}";
-        if (warning is not null)
-            text += $" | {warning}";
+        var text = $"Clicked ref={request.Ref}{posInfo} via {outcome.Path}";
+        if (outcome.Warning is not null)
+            text += $" | {outcome.Warning}";
 
-        var response = new ActionResponse { Success = true, Message = text };
+        var response = new ActionResponse { Success = true, Message = await SettleAsync(text, request.Timeout) };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
@@ -258,8 +297,7 @@ public sealed class IpcServer
     {
         var request = IpcSerializer.DeserializePayload<TypeTextRequest>(message.Payload!.Value);
 
-        var element = _refRegistry.Resolve(request.Ref)
-            ?? throw new InvalidOperationException($"Element ref={request.Ref} not found. Call snapshot first.");
+        var element = ResolveRef(request.Ref);
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         await waiter.WaitForReady(element);
@@ -269,7 +307,11 @@ public sealed class IpcServer
             TypeAction.Execute(element, request.Text, request.Clear);
         });
 
-        var response = new ActionResponse { Success = true, Message = $"Typed into ref={request.Ref}" };
+        var response = new ActionResponse
+        {
+            Success = true,
+            Message = await SettleAsync($"Typed into ref={request.Ref}", request.Timeout)
+        };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
@@ -279,8 +321,7 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleSelect(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<SelectRequest>(message.Payload!.Value);
-        var element = _refRegistry.Resolve(request.Ref)
-            ?? throw new InvalidOperationException($"Element ref={request.Ref} not found.");
+        var element = ResolveRef(request.Ref);
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         await waiter.WaitForReady(element);
@@ -290,7 +331,11 @@ public sealed class IpcServer
             SelectAction.Execute(element, request.ItemText, request.ItemIndex);
         });
 
-        var response = new ActionResponse { Success = true, Message = $"Selected item in ref={request.Ref}" };
+        var response = new ActionResponse
+        {
+            Success = true,
+            Message = await SettleAsync($"Selected item in ref={request.Ref}", request.Timeout)
+        };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
@@ -300,8 +345,7 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleToggle(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<ToggleRequest>(message.Payload!.Value);
-        var element = _refRegistry.Resolve(request.Ref)
-            ?? throw new InvalidOperationException($"Element ref={request.Ref} not found.");
+        var element = ResolveRef(request.Ref);
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         await waiter.WaitForReady(element);
@@ -311,7 +355,11 @@ public sealed class IpcServer
             ToggleAction.Execute(element);
         });
 
-        var response = new ActionResponse { Success = true, Message = $"Toggled ref={request.Ref}" };
+        var response = new ActionResponse
+        {
+            Success = true,
+            Message = await SettleAsync($"Toggled ref={request.Ref}", request.Timeout)
+        };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
@@ -321,8 +369,7 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleExpand(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<ExpandRequest>(message.Payload!.Value);
-        var element = _refRegistry.Resolve(request.Ref)
-            ?? throw new InvalidOperationException($"Element ref={request.Ref} not found.");
+        var element = ResolveRef(request.Ref);
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         await waiter.WaitForReady(element);
@@ -333,7 +380,11 @@ public sealed class IpcServer
         });
 
         var action = request.Expand ? "Expanded" : "Collapsed";
-        var response = new ActionResponse { Success = true, Message = $"{action} ref={request.Ref}" };
+        var response = new ActionResponse
+        {
+            Success = true,
+            Message = await SettleAsync($"{action} ref={request.Ref}", request.Timeout)
+        };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
@@ -343,8 +394,7 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleScroll(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<ScrollRequest>(message.Payload!.Value);
-        var element = _refRegistry.Resolve(request.Ref)
-            ?? throw new InvalidOperationException($"Element ref={request.Ref} not found.");
+        var element = ResolveRef(request.Ref);
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         await waiter.WaitForReady(element);
@@ -354,7 +404,11 @@ public sealed class IpcServer
             ScrollAction.Execute(element, request.HorizontalPercent, request.VerticalPercent);
         });
 
-        var response = new ActionResponse { Success = true, Message = $"Scrolled ref={request.Ref}" };
+        var response = new ActionResponse
+        {
+            Success = true,
+            Message = await SettleAsync($"Scrolled ref={request.Ref}", request.Timeout)
+        };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
@@ -397,7 +451,7 @@ public sealed class IpcServer
                     "been consumed by window activation, so the drag may not have reached the control. " +
                     "Bring the window to the front and retry.";
 
-        var response = new ActionResponse { Success = true, Message = text };
+        var response = new ActionResponse { Success = true, Message = await SettleAsync(text, request.Timeout) };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
@@ -409,8 +463,7 @@ public sealed class IpcServer
         if (!elementRef.HasValue)
             return null;
 
-        var element = _refRegistry.Resolve(elementRef.Value)
-            ?? throw new InvalidOperationException($"Element ref={elementRef} not found. Call snapshot first.");
+        var element = ResolveRef(elementRef.Value);
 
         return element as UIElement
             ?? throw new InvalidOperationException($"Element ref={elementRef} ({element.GetType().Name}) is not a UIElement.");
@@ -455,8 +508,7 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleGetProperty(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<GetPropertyRequest>(message.Payload!.Value);
-        var element = _refRegistry.Resolve(request.Ref)
-            ?? throw new InvalidOperationException($"Element ref={request.Ref} not found.");
+        var element = ResolveRef(request.Ref);
 
         var response = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -474,8 +526,7 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleGetBindings(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<GetBindingsRequest>(message.Payload!.Value);
-        var element = _refRegistry.Resolve(request.Ref)
-            ?? throw new InvalidOperationException($"Element ref={request.Ref} not found.");
+        var element = ResolveRef(request.Ref);
 
         var response = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -500,8 +551,10 @@ public sealed class IpcServer
         {
             if (request.Ref.HasValue)
             {
-                var element = _refRegistry.Resolve(request.Ref.Value) as UIElement
-                    ?? throw new InvalidOperationException($"Element ref={request.Ref} not found or not a UIElement.");
+                var element = ResolveRef(request.Ref.Value) as UIElement
+                    ?? throw new InvalidOperationException(
+                        $"Element ref={request.Ref} cannot be captured because it is not a UIElement. " +
+                        "Pick an element that renders, or omit ref to capture the whole window.");
                 return ScreenshotCapture.CaptureElement(element, request.MaxWidth);
             }
             return ScreenshotCapture.CaptureWindow(maxWidth: request.MaxWidth);
@@ -516,8 +569,7 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleAssert(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<AssertRequest>(message.Payload!.Value);
-        var element = _refRegistry.Resolve(request.Ref)
-            ?? throw new InvalidOperationException($"Element ref={request.Ref} not found.");
+        var element = ResolveRef(request.Ref);
 
         var (actual, passed) = await Application.Current.Dispatcher.InvokeAsync(() =>
         {

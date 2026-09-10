@@ -10,4 +10,9 @@
     <ProjectReference Include="..\Xapper.Protocol\Xapper.Protocol.csproj" />
   </ItemGroup>
 
+  <!-- 내부 헬퍼를 공개 API로 올리지 않고 테스트에서 직접 검증하기 위함 -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Xapper.Tests" />
+  </ItemGroup>
+
 </Project>

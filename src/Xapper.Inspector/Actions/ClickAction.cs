@@ -29,6 +29,21 @@ public static class ClickAction
         "WARNING: the target window could not be brought to the foreground. The click may have been " +
         "consumed by window activation and never reached the control. Bring the window to the front and retry.";
 
+    /// <summary>접근성 Invoke 패턴으로 눌렀을 때의 경로 이름. 마우스 이벤트는 발생하지 않는다.</summary>
+    private const string AutomationInvokePath = "the automation Invoke pattern (no mouse events raised)";
+
+    /// <summary>접근성 Toggle 패턴으로 전환했을 때의 경로 이름. 마우스 이벤트는 발생하지 않는다.</summary>
+    private const string AutomationTogglePath = "the automation Toggle pattern (no mouse events raised)";
+
+    /// <summary>버튼의 클릭 이벤트를 직접 올렸을 때의 경로 이름. 마우스 이벤트는 발생하지 않는다.</summary>
+    private const string ButtonClickEventPath = "the ButtonBase click event (no mouse events raised)";
+
+    /// <summary>라우티드 마우스 이벤트를 흉내 냈을 때의 경로 이름. 실제 입력은 아니다.</summary>
+    private const string SimulatedMouseEventPath = "simulated routed mouse events (not real input)";
+
+    /// <summary>실제 마우스 입력을 보냈을 때의 경로 이름.</summary>
+    private const string RealMouseInputPath = "real mouse input";
+
     #endregion
 
     #region Public Methods
@@ -39,9 +54,9 @@ public static class ClickAction
     /// <param name="element">클릭할 대상 요소.</param>
     /// <param name="relativeX">요소 내 상대 X 좌표 (0.0~1.0). null이면 기본 클릭.</param>
     /// <param name="relativeY">요소 내 상대 Y 좌표 (0.0~1.0). null이면 기본 클릭.</param>
-    /// <returns>주의가 필요한 상황이면 경고 문구, 문제가 없으면 null.</returns>
+    /// <returns>수행된 클릭 경로와, 주의가 필요하면 경고 문구.</returns>
     /// <exception cref="InvalidOperationException">요소가 UIElement가 아닌 경우.</exception>
-    public static string? Execute(DependencyObject element, double? relativeX = null, double? relativeY = null)
+    public static ClickOutcome Execute(DependencyObject element, double? relativeX = null, double? relativeY = null)
     {
         if (element is not UIElement uiElement)
             throw new InvalidOperationException($"Element {element.GetType().Name} is not a UIElement");
@@ -50,9 +65,10 @@ public static class ClickAction
         if (relativeX.HasValue && relativeY.HasValue)
             return ClickAtPosition(uiElement, relativeX.Value, relativeY.Value);
 
-        RaiseClick(uiElement);
+        var path = RaiseClick(uiElement);
 
-        return MouseInput.IsReachableByMouse(uiElement, 0.5, 0.5) ? null : UnreachableWarning;
+        return new ClickOutcome(path,
+            MouseInput.IsReachableByMouse(uiElement, 0.5, 0.5) ? null : UnreachableWarning);
     }
 
     #endregion
@@ -62,7 +78,8 @@ public static class ClickAction
     /// <summary>
     /// 접근성 인터페이스와 라우티드 이벤트로 클릭을 발생시킵니다. 히트테스트를 거치지 않습니다.
     /// </summary>
-    private static void RaiseClick(UIElement uiElement)
+    /// <returns>실제로 사용된 경로에 대한 설명.</returns>
+    private static string RaiseClick(UIElement uiElement)
     {
         // Priority 1: AutomationPeer
         var peer = UIElementAutomationPeer.CreatePeerForElement(uiElement);
@@ -71,13 +88,13 @@ public static class ClickAction
             if (peer.GetPattern(PatternInterface.Invoke) is IInvokeProvider invoker)
             {
                 invoker.Invoke();
-                return;
+                return AutomationInvokePath;
             }
 
             if (peer.GetPattern(PatternInterface.Toggle) is IToggleProvider toggler)
             {
                 toggler.Toggle();
-                return;
+                return AutomationTogglePath;
             }
         }
 
@@ -85,7 +102,7 @@ public static class ClickAction
         if (uiElement is ButtonBase button)
         {
             button.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-            return;
+            return ButtonClickEventPath;
         }
 
         // Priority 3: 마우스 이벤트 시뮬레이션 (최후 수단)
@@ -105,17 +122,19 @@ public static class ClickAction
         {
             RoutedEvent = UIElement.MouseLeftButtonUpEvent
         });
+
+        return SimulatedMouseEventPath;
     }
 
     /// <summary>
     /// 요소 내 상대 좌표를 스크린 좌표로 변환하고, 대상 윈도우를 포그라운드로 올린 뒤 클릭합니다.
     /// </summary>
-    private static string? ClickAtPosition(UIElement element, double relativeX, double relativeY)
+    private static ClickOutcome ClickAtPosition(UIElement element, double relativeX, double relativeY)
     {
         var screenPoint = MouseInput.ToScreenPoint(element, relativeX, relativeY);
         var activated = MouseInput.BringToForeground(element);
         MouseInput.ClickAt(screenPoint);
-        return activated ? null : NotForegroundWarning;
+        return new ClickOutcome(RealMouseInputPath, activated ? null : NotForegroundWarning);
     }
 
     #endregion

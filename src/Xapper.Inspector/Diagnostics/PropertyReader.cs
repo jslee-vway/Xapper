@@ -20,6 +20,14 @@ public static class PropertyReader
     /// <exception cref="InvalidOperationException">프로퍼티를 찾을 수 없는 경우.</exception>
     public static PropertyResponse ReadProperty(DependencyObject element, string propertyName)
     {
+        // 점이 들어간 이름은 속성 경로로 쓴 것인데 이 도구는 경로를 해석하지 않는다.
+        // 그냥 못 찾았다고 하면 "그 속성이 없다"로 읽혀 원인을 엉뚱한 곳에서 찾게 된다.
+        if (propertyName.Contains('.'))
+            throw new InvalidOperationException(
+                $"Property paths are not supported: \"{propertyName}\". Pass one property name that the " +
+                "element itself declares, and read its value from the result. Attached properties written " +
+                "as Owner.Name cannot be read this way either.");
+
         // DependencyProperty 우선 탐색 (정적 필드 "{Name}Property" 패턴)
         var dpField = element.GetType()
             .GetField($"{propertyName}Property", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy);
@@ -51,6 +59,8 @@ public static class PropertyReader
         }
 
         throw new InvalidOperationException(
-            $"Property \"{propertyName}\" not found on {element.GetType().Name}");
+            $"Property \"{propertyName}\" not found on {element.GetType().Name}. " +
+            "The name must match a dependency property or a public instance property of that exact type. " +
+            "Use xapper_snapshot to confirm the element type first.");
     }
 }
