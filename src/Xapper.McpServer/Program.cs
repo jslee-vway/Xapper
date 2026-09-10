@@ -56,6 +56,14 @@ var serverInstructions = """
     in its response rather than trusting the word "Clicked". When the element needs genuine input - hit
     testing, mouse capture, a handler on MouseDown rather than MouseLeftButtonDown - pass x/y.
 
+    Two paths use the real mouse: click with x/y, and any drag that does not start on a splitter, slider or
+    scrollbar thumb. Both move the physical cursor and hand focus to the target window, so they interrupt
+    whatever the person is doing. There is no way around it - a control that reads the OS button state cannot
+    be driven by synthetic events, and Windows takes a drop location from the physical cursor and nowhere
+    else. Prefer the paths that do not need the cursor, and when one of these two is the only way, say so to
+    the person and let them get their hands off the keyboard before you call it. Announcing costs one
+    sentence; a cursor that moves on its own with no warning reads as the machine malfunctioning.
+
     Attach first: xapper_list_processes, then xapper_attach. Attaching again to a process you are already
     attached to is rejected, but the rejection surfaces only after the injection attempt, as a connect
     failure - so detach before re-attaching rather than retrying.

@@ -451,15 +451,8 @@ public sealed class IpcServer
                 return (Start: start, End: end, Activated: true, UsedThumb: true);
             }
 
-            // 거절은 창을 앞으로 끌어오기 **전에** 해야 한다. 뒤에 두면 거절된 요청도 포커스를 빼앗는다.
-            if (!request.AllowRealInput)
-                throw new InvalidOperationException(
-                    RealInputRequired.Marker +
-                    " This drag needs real mouse input. Nothing at the start point is a splitter, slider or " +
-                    "scrollbar thumb, and those are the only drags a control will accept as events. Dragging an " +
-                    "item onto a drop target cannot be done any other way either, because Windows decides the " +
-                    "drop location from the physical cursor.");
-
+            // 여기부터는 실제 마우스 입력이다. 출발 지점에 썸이 없으면 다른 길이 없다 — 항목을 대상에
+            // 떨어뜨리는 드래그는 Windows 가 물리 커서에서 드롭 위치를 읽으므로 이벤트로는 흉내 낼 수 없다.
             var anchor = source ?? target;
             var activated = anchor is null || MouseInput.BringToForeground(anchor);
 

@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using McpServerInstance = ModelContextProtocol.Server.McpServer;
 using ModelContextProtocol.Server;
 using Xapper.Protocol;
 using Xapper.Protocol.Messages.Responses;
@@ -28,8 +27,8 @@ public sealed class ActionTools
         "do - but it requires the target window to be in the foreground and it takes over the physical cursor, " +
         "interrupting the human operator. Default to the event mode for routine steps, and switch to x/y when " +
         "the point of the test IS that a user can physically reach the control, or when the response warns that " +
-        "the element is not reachable - but x/y now asks the person at the keyboard first, and does nothing if " +
-        "they decline, so reach for it only when the event mode genuinely cannot drive the control. " +
+        "the element is not reachable. " +
+        "Because this takes over the physical cursor and the keyboard focus, it interrupts whatever the person is doing at that moment. Tell them you are about to drive the mouse BEFORE you call it, and give them a moment to stop typing - an unannounced cursor that moves on its own reads as a malfunction. " +
         "What the event mode does depends on the element, and the response names " +
         "the path it took - check it when a click appears to do nothing. A control with an accessibility " +
         "pattern is invoked or toggled through it, and a ButtonBase-derived control whose peer offers neither " +
@@ -46,7 +45,6 @@ public sealed class ActionTools
         "when the element is unreachable by a real mouse, or when the window could not be activated.")]
     public async Task<string> Click(
         [Description("Element ref from last snapshot")] int @ref,
-        McpServerInstance server,
         [Description("Relative X position within element (0.0=left, 1.0=right). Omit for event-based click.")] double? x = null,
         [Description("Relative Y position within element (0.0=top, 1.0=bottom). Omit for event-based click.")] double? y = null,
         [Description("Timeout in ms (default 5000). Spent twice - first waiting for the element to be ready, then bounding the wait for the click to be processed - so the worst case is about double this value")] int timeout = 5000,
@@ -55,15 +53,6 @@ public sealed class ActionTools
         if (x.HasValue != y.HasValue)
             return "Error: x and y go together. Supply both to click at a point inside the element, or neither " +
                    "to let the element be driven through its own events.";
-
-        if (x.HasValue && !await RealInputApproval.AskAsync(server, "click at a point", ct))
-            return "Error: clicking at coordinates sends real mouse input, which moves the physical cursor and " +
-                   "hands focus to the target window, interrupting whatever the person at the keyboard is doing. " +
-                   "They were asked and it was not permitted. Omit x and y instead: that path drives any control " +
-                   "with an accessibility pattern and any Button, and for anything else it raises the four " +
-                   "Left-specific mouse events, which is enough unless the control watches the physical button " +
-                   "state. If the element is hard to identify, xapper_element_at gives you a ref for whatever is " +
-                   "drawn at a point.";
 
         var client = _sessionManager.GetActive();
         var response = await client.ClickAsync(@ref, timeout, x, y, ct);

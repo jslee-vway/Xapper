@@ -138,14 +138,14 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 - 검색·스냅샷은 열린 최상위 창을 모두 순회하므로 **Popup·ContextMenu·드롭다운 안의 항목도 보인다**
 
 ### **4. UI 자동 조작**
-- `xapper_click` : 버튼/요소 클릭. 좌표를 주지 않으면 AutomationPeer → RaiseEvent 폴백(빠르지만 히트테스트를 건너뛰므로 가려진 요소도 눌림), 좌표를 주면 실제 마우스 입력(사용자와 동일하지만 창이 앞에 있어야 하고 커서를 점유). 요소가 실제 마우스로 닿지 않거나 창 활성화에 실패하면 응답에 경고가 붙는다. 어느 경로로 눌렀는지(접근성 패턴 / 실제 마우스 입력)가 표시되며, 접근성 경로는 큐에 걸린 조작이 처리될 때까지 기다렸다가 반환하며, 제한 시간을 넘기면 아직 처리 중이라고 알린다
+- `xapper_click` : 버튼/요소 클릭. 좌표를 주지 않으면 AutomationPeer → RaiseEvent 폴백(빠르지만 히트테스트를 건너뛰므로 가려진 요소도 눌림), 좌표를 주면 실제 마우스 입력(사용자와 동일하지만 창이 앞에 있어야 하고 커서와 포커스를 가져가므로, 호출 전에 사용자에게 알리도록 도구 설명이 권고한다). 요소가 실제 마우스로 닿지 않거나 창 활성화에 실패하면 응답에 경고가 붙는다. 어느 경로로 눌렀는지(접근성 패턴 / 실제 마우스 입력)가 표시되며, 접근성 경로는 큐에 걸린 조작이 처리될 때까지 기다렸다가 반환하며, 제한 시간을 넘기면 아직 처리 중이라고 알린다
   - 상대 좌표 지정 시 SendInput으로 위치 기반 클릭 (듀얼 모니터/DPI 대응). **기본은 사용자에게 물어본 뒤에만 수행** — 물리 커서를 옮기고 대상 창에 포커스를 넘겨 사용자의 작업을 끊기 때문
 - `xapper_type` : TextBox에 텍스트 입력
 - `xapper_select` : ComboBox/ListBox 항목 선택
 - `xapper_toggle` : CheckBox/ToggleButton 토글
 - `xapper_expand` : TreeViewItem/Expander 펼치기/접기
 - `xapper_scroll` : ScrollViewer 스크롤
-- `xapper_drag` : 드래그 (요소→요소 / 요소+픽셀 오프셋 / 절대 화면 좌표). **시작 지점**이 스플리터·슬라이더·스크롤바 썸이면 그 컨트롤의 드래그 이벤트로 처리해 커서도 포커스도 건드리지 않는다 (목록에 스크롤바가 있다고 항목 드래그가 스크롤로 바뀌지 않는다). 항목을 끌어다 놓는 드래그는 떨어지는 자리를 실제 커서가 정하므로 실제 입력이 필요하며, 그때만 사용자에게 물어본다
+- `xapper_drag` : 드래그 (요소→요소 / 요소+픽셀 오프셋 / 절대 화면 좌표). **시작 지점**이 스플리터·슬라이더·스크롤바 썸이면 그 컨트롤의 드래그 이벤트로 처리해 커서도 포커스도 건드리지 않는다 (목록에 스크롤바가 있다고 항목 드래그가 스크롤로 바뀌지 않는다). 항목을 끌어다 놓는 드래그는 떨어지는 자리를 실제 커서가 정하므로 실제 입력이 필요하다. 커서와 포커스를 가져가므로 호출 전에 사용자에게 알리도록 도구 설명이 권고한다
 
 ### **5. 진단 및 검증**
 - `xapper_get_property` : 임의 DependencyProperty 값 읽기
@@ -268,13 +268,13 @@ AI 에이전트가 자동으로 수행하는 흐름:
 | `xapper_snapshot` | UI 트리 스냅샷 | `maxDepth` |
 | `xapper_find` | 요소 검색 | `name`, `automationId`, `type`, `text` |
 | `xapper_element_at` | 좌표의 요소 조회 | `x`, `y`, `maxAncestors` (선택) |
-| `xapper_click` | 클릭 | `ref`, `x`, `y`, `allowRealInput` (모두 선택) |
+| `xapper_click` | 클릭 | `ref`, `x`, `y` (모두 선택) |
 | `xapper_type` | 텍스트 입력 | `ref`, `text` |
 | `xapper_select` | 항목 선택 | `ref`, `item` |
 | `xapper_toggle` | 토글 | `ref` |
 | `xapper_expand` | 펼치기/접기 | `ref`, `expand` |
 | `xapper_scroll` | 스크롤 | `ref`, `direction`, `amount` |
-| `xapper_drag` | 드래그 | `sourceRef`, `targetRef`, `offsetX`/`offsetY`, 화면 좌표, `allowRealInput` (모두 선택) |
+| `xapper_drag` | 드래그 | `sourceRef`, `targetRef`, `offsetX`/`offsetY`, 화면 좌표 (모두 선택) |
 | `xapper_get_property` | 속성 읽기 | `ref`, `propertyName` |
 | `xapper_get_bindings` | 바인딩 조회 | `ref` |
 | `xapper_screenshot` | 스크린샷 (이미지 반환) | `ref`, `maxWidth`, `savePath`, `mode` (모두 선택) |

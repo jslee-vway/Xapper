@@ -6,8 +6,6 @@ namespace Xapper.Protocol.Messages.Requests;
 /// </summary>
 public sealed class DragRequest
 {
-    /// <summary>실제 마우스 입력을 써도 되는지. 물리 커서를 옮기고 대상 창에 포커스를 넘기므로 기본은 거절.</summary>
-    public bool AllowRealInput { get; set; }
 
     /// <summary>드래그를 시작할 요소의 참조 번호. null이면 <see cref="SourceX"/>/<see cref="SourceY"/>를 화면 좌표로 해석.</summary>
     public int? SourceRef { get; set; }

@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using McpServerInstance = ModelContextProtocol.Server.McpServer;
 using ModelContextProtocol.Server;
 using Xapper.Protocol;
 using Xapper.Protocol.Messages.Responses;
@@ -68,9 +67,8 @@ public sealed class InteractionTools
         return FormatResponse(response);
     }
 
-    [McpServerTool(Name = "xapper_drag"), Description("Drag with the left mouse button held down. Three modes: element to element (sourceRef + targetRef), element by pixel offset (sourceRef + offsetX/offsetY), or absolute screen points (sourceX/sourceY + targetX/targetY). Two very different things can happen and the response says which did. If the start point lands on a splitter, slider or scrollbar thumb, that control's own drag events are raised: the movement is given as a number, so it is more precise than a real drag and it touches neither the cursor nor focus. Note that the start point decides this, not the element you name - starting on a list item does not become a scrollbar drag just because the list has a scrollbar. For a slider or a scrollbar prefer xapper_scroll or setting the value outright; drag is for splitters and for the cases below. Everything else - dropping an item on a target, moving a shape on a canvas - is done with real mouse input, which moves the physical cursor and takes focus. There is no event-based fallback here as there is for clicking, and a drop cannot be aimed at all without the cursor, because Windows reads the drop location from it. The person at the keyboard is asked before that happens; if they decline, nothing is sent. It also needs the target window in front, and the response carries a WARNING when it could not be brought there, which means the drag may not have reached the control.")]
+    [McpServerTool(Name = "xapper_drag"), Description("Drag with the left mouse button held down. Three modes: element to element (sourceRef + targetRef), element by pixel offset (sourceRef + offsetX/offsetY), or absolute screen points (sourceX/sourceY + targetX/targetY). Two very different things can happen and the response says which did. If the start point lands on a splitter, slider or scrollbar thumb, that control's own drag events are raised: the movement is given as a number, so it is more precise than a real drag and it touches neither the cursor nor focus. Note that the start point decides this, not the element you name - starting on a list item does not become a scrollbar drag just because the list has a scrollbar. For a slider or a scrollbar prefer xapper_scroll or setting the value outright; drag is for splitters and for the cases below. Everything else - dropping an item on a target, moving a shape on a canvas - is done with real mouse input, which moves the physical cursor and takes focus. There is no event-based fallback here as there is for clicking, and a drop cannot be aimed at all without the cursor, because Windows reads the drop location from it. Because that takes over the physical cursor and the keyboard focus, it interrupts whatever the person is doing at that moment. Tell them you are about to drive the mouse BEFORE you call it, and give them a moment to stop typing - an unannounced cursor that moves on its own reads as a malfunction. It also needs the target window in front, and the response carries a WARNING when it could not be brought there, which means the drag may not have reached the control.")]
     public async Task<string> Drag(
-        McpServerInstance server,
         [Description("Source element ref from last snapshot. Omit to treat sourceX/sourceY as absolute screen pixels")] int? sourceRef = null,
         [Description("Start X: relative 0.0-1.0 within the source element (default 0.5), or absolute screen X when sourceRef is omitted")] double? sourceX = null,
         [Description("Start Y: relative 0.0-1.0 within the source element (default 0.5), or absolute screen Y when sourceRef is omitted")] double? sourceY = null,
@@ -84,27 +82,9 @@ public sealed class InteractionTools
     {
         var client = _sessionManager.GetActive();
         var response = await client.DragAsync(
-            sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, timeout, false, ct);
-
-        // 썸으로 처리되는 드래그는 여기 오지 않는다. 실제 입력이 있어야만 되는 경우에만 사람에게 묻는다.
-        // 첫 호출이 실제 입력을 쓰지 않으므로, 거절당하더라도 포커스를 빼앗지 않는다.
-        if (NeedsRealInput(response) && await RealInputApproval.AskAsync(server, "drag with the mouse held down", ct))
-        {
-            response = await client.DragAsync(
-                sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, timeout, true, ct);
-        }
+            sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, timeout, ct);
 
         return FormatResponse(response);
-    }
-
-    /// <summary>
-    /// 주입된 쪽이 "실제 입력이 있어야만 된다"고 거절했는지 판별합니다.
-    /// 썸으로 처리할 수 있는지는 주입된 쪽만 알 수 있으므로, 그 판단을 받아 본 뒤에 사람에게 묻는다.
-    /// </summary>
-    internal static bool NeedsRealInput(IpcMessage response)
-    {
-        return response.Type == "error"
-            && response.Payload?.GetRawText().Contains(RealInputRequired.Marker) == true;
     }
 
     private static string FormatResponse(IpcMessage response)

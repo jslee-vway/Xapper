@@ -175,10 +175,9 @@ public sealed class InspectorClient : IAsyncDisposable
         double? offsetX = null,
         double? offsetY = null,
         int timeout = 5000,
-        bool allowRealInput = false,
         CancellationToken ct = default)
     {
-        var payload = new { sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, timeout, allowRealInput };
+        var payload = new { sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, timeout };
         var request = IpcSerializer.CreateRequest("drag", payload);
         return await SendAsync(request, ct);
     }
