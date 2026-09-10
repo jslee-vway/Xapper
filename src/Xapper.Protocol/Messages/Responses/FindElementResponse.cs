@@ -7,6 +7,9 @@ public sealed class FindElementResponse
 {
     /// <summary>검색 조건에 매칭된 요소 목록.</summary>
     public List<ElementMatch> Matches { get; set; } = [];
+
+    /// <summary>순회할 수 없어 건너뛴 노드의 설명 목록. 비어 있으면 트리를 끝까지 탐색한 것.</summary>
+    public List<string> SkippedNodes { get; set; } = [];
 }
 
 /// <summary>

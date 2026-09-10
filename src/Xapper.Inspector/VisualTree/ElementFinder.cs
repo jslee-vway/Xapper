@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
-using System.Windows.Media;
 using Xapper.Protocol.Messages.Requests;
 using Xapper.Protocol.Messages.Responses;
 
@@ -16,21 +15,22 @@ public sealed class ElementFinder
     /// <summary>
     /// 루트 요소부터 비주얼 트리를 탐색하여 조건에 맞는 요소를 검색합니다.
     /// 매칭된 요소는 RefRegistry에 등록되어 이후 액션에서 참조 가능.
+    /// 순회할 수 없는 노드를 만나면 그 가지만 건너뛰고 나머지 탐색을 계속하며, 건너뛴 노드는 응답에 함께 보고.
     /// </summary>
     /// <param name="root">탐색 시작 지점.</param>
     /// <param name="request">검색 조건 (Name, AutomationId, Type, Text).</param>
     /// <param name="registry">매칭된 요소를 등록할 참조 레지스트리.</param>
-    /// <returns>매칭된 요소 목록.</returns>
+    /// <returns>매칭된 요소 목록과 건너뛴 노드 목록.</returns>
     public FindElementResponse Find(DependencyObject root, FindElementRequest request, RefRegistry registry)
     {
         var response = new FindElementResponse();
-        SearchTree(root, request, registry, response);
+        SearchTree(root, request, registry, response, depth: 0);
         return response;
     }
 
     #region Private Methods
 
-    private void SearchTree(DependencyObject element, FindElementRequest request, RefRegistry registry, FindElementResponse response)
+    private void SearchTree(DependencyObject element, FindElementRequest request, RefRegistry registry, FindElementResponse response, int depth)
     {
         if (Matches(element, request))
         {
@@ -45,10 +45,9 @@ public sealed class ElementFinder
             });
         }
 
-        var childCount = VisualTreeHelper.GetChildrenCount(element);
-        for (int i = 0; i < childCount; i++)
+        foreach (var child in VisualChildren.Of(element, depth, response.SkippedNodes))
         {
-            SearchTree(VisualTreeHelper.GetChild(element, i), request, registry, response);
+            SearchTree(child, request, registry, response, depth + 1);
         }
     }
 

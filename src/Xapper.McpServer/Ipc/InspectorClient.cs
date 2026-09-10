@@ -54,23 +54,47 @@ public sealed class InspectorClient : IAsyncDisposable
     /// <returns>Inspector로부터 수신한 응답 메시지.</returns>
     public async Task<IpcMessage> SendAsync(IpcMessage request, CancellationToken ct = default)
     {
-        if (_pipe == null || !_pipe.IsConnected)
-            throw new InvalidOperationException("Not connected to inspector");
+        var bytes = IpcSerializer.Serialize(request);
 
         await _sendLock.WaitAsync(ct);
         try
         {
-            var bytes = IpcSerializer.Serialize(request);
-            await _pipe.WriteAsync(bytes, ct);
-            await _pipe.FlushAsync(ct);
+            // 연결 상태는 잠금 안에서 확인하고 지역 변수로 붙든다.
+            // 앞선 호출이 어긋난 연결을 끊으면 _pipe가 null이 되므로, 잠금 밖에서 통과한 검사는 이미 낡은 것이다.
+            var pipe = _pipe;
+            if (pipe is null || !pipe.IsConnected)
+                throw new InvalidOperationException("Not connected to inspector");
 
-            var response = await IpcSerializer.DeserializeAsync(_pipe, ct);
+            await pipe.WriteAsync(bytes, ct);
+            await pipe.FlushAsync(ct);
+
+            var response = await IpcSerializer.DeserializeAsync(pipe, ct);
             return response ?? throw new InvalidOperationException("Received null response");
+        }
+        catch
+        {
+            // 요청을 보낸 뒤 응답을 끝까지 읽지 못하면 읽다 만 바이트가 파이프에 남는다.
+            // 길이 접두사가 한 칸 밀린 채로는 이후 모든 응답이 엉뚱하게 해석되고 되돌릴 방법이 없으므로,
+            // 어긋난 연결을 조용히 계속 쓰는 대신 끊어서 다음 호출이 재연결을 요구하게 한다.
+            await DisconnectAsync();
+            throw;
         }
         finally
         {
             _sendLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Named Pipe 연결을 끊고 연결 상태를 해제합니다.
+    /// </summary>
+    private async Task DisconnectAsync()
+    {
+        if (_pipe is null)
+            return;
+
+        await _pipe.DisposeAsync();
+        _pipe = null;
     }
 
     #endregion
@@ -207,11 +231,7 @@ public sealed class InspectorClient : IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        if (_pipe != null)
-        {
-            await _pipe.DisposeAsync();
-            _pipe = null;
-        }
+        await DisconnectAsync();
         _sendLock.Dispose();
     }
 

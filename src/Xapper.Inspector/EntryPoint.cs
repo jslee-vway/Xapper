@@ -86,7 +86,7 @@ public static class EntryPoint
     {
         var pipeName = Protocol.IpcPipeNames.ForProcess(Environment.ProcessId);
         Log($"Starting server on pipe: {pipeName}");
-        _server = new IpcServer(pipeName);
+        _server = new IpcServer(pipeName, Log);
         _ = Task.Run(async () =>
         {
             try

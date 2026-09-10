@@ -2,7 +2,6 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Media;
 using Xapper.Protocol;
 
 namespace Xapper.Inspector.VisualTree;
@@ -15,19 +14,21 @@ public sealed class TreeWalker
 {
     /// <summary>
     /// 루트 요소부터 지정된 깊이까지 비주얼 트리를 순회합니다.
+    /// 순회할 수 없는 노드를 만나면 그 가지만 건너뛰고 나머지 순회를 계속합니다.
     /// </summary>
     /// <param name="root">순회 시작 요소.</param>
     /// <param name="registry">요소를 등록할 참조 레지스트리.</param>
     /// <param name="maxDepth">최대 탐색 깊이.</param>
+    /// <param name="skipped">건너뛴 노드의 설명을 기록할 목록.</param>
     /// <returns>루트 요소의 스냅샷 (자식 포함).</returns>
-    public ElementSnapshot Walk(DependencyObject root, RefRegistry registry, int maxDepth)
+    public ElementSnapshot Walk(DependencyObject root, RefRegistry registry, int maxDepth, List<string> skipped)
     {
-        return WalkElement(root, registry, 0, maxDepth);
+        return WalkElement(root, registry, 0, maxDepth, skipped);
     }
 
     #region Private Methods
 
-    private ElementSnapshot WalkElement(DependencyObject element, RefRegistry registry, int depth, int maxDepth)
+    private ElementSnapshot WalkElement(DependencyObject element, RefRegistry registry, int depth, int maxDepth, List<string> skipped)
     {
         var refId = registry.Register(element);
 
@@ -45,11 +46,9 @@ public sealed class TreeWalker
 
         if (depth < maxDepth)
         {
-            var childCount = VisualTreeHelper.GetChildrenCount(element);
-            for (int i = 0; i < childCount; i++)
+            foreach (var child in VisualChildren.Of(element, depth, skipped))
             {
-                var child = VisualTreeHelper.GetChild(element, i);
-                snapshot.Children.Add(WalkElement(child, registry, depth + 1, maxDepth));
+                snapshot.Children.Add(WalkElement(child, registry, depth + 1, maxDepth, skipped));
             }
         }
 

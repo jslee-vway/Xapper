@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Xapper.Protocol\Xapper.Protocol.csproj" />
+    <ProjectReference Include="..\..\src\Xapper.Inspector\Xapper.Inspector.csproj" />
+    <ProjectReference Include="..\..\src\Xapper.McpServer\Xapper.McpServer.csproj" />
   </ItemGroup>
 
 </Project>

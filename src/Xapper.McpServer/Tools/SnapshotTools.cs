@@ -44,6 +44,8 @@ public sealed class SnapshotTools
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Generation: {response.Generation}");
+        if (response.SkippedNodes.Count > 0)
+            sb.AppendLine($"Skipped: {response.SkippedNodes.Count} unreadable node(s) (use format=\"json\" to see where)");
         sb.AppendLine();
         FormatElement(sb, response.Root, 0);
         return sb.ToString();

@@ -10,4 +10,7 @@ public sealed class SnapshotResponse
 
     /// <summary>비주얼 트리의 루트 요소 스냅샷.</summary>
     public required ElementSnapshot Root { get; set; }
+
+    /// <summary>순회할 수 없어 건너뛴 노드의 설명 목록. 비어 있으면 트리를 끝까지 순회한 것.</summary>
+    public List<string> SkippedNodes { get; set; } = [];
 }

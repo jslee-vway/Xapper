@@ -1,4 +1,3 @@
-using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Windows;
@@ -21,6 +20,7 @@ public sealed class IpcServer
     #region Fields
 
     private readonly string _pipeName;
+    private readonly Action<string>? _log;
     private readonly RefRegistry _refRegistry = new();
     private readonly TreeWalker _treeWalker = new();
     private CancellationTokenSource? _cts;
@@ -33,9 +33,11 @@ public sealed class IpcServer
     /// <see cref="IpcServer"/>의 새 인스턴스를 생성합니다.
     /// </summary>
     /// <param name="pipeName">수신 대기할 Named Pipe 이름.</param>
-    public IpcServer(string pipeName)
+    /// <param name="log">진단 메시지를 기록할 대상. 주입된 프로세스에서는 이것이 유일한 관찰 통로이다.</param>
+    public IpcServer(string pipeName, Action<string>? log = null)
     {
         _pipeName = pipeName;
+        _log = log;
     }
 
     #endregion
@@ -65,9 +67,12 @@ public sealed class IpcServer
             {
                 await HandleConnection(pipe, _cts.Token);
             }
-            catch (Exception ex) when (ex is IOException or OperationCanceledException)
+            catch (Exception ex)
             {
-                // 클라이언트 연결 해제 또는 종료 요청
+                // 연결 해제, 종료 요청, 프레임이 어긋난 요청 모두 이 연결 하나만 버리고 다음 연결을 계속 받는다.
+                // 예외가 여기를 빠져나가면 수신 루프가 끝나 대상 앱을 재시작하기 전에는 다시 붙을 수 없다.
+                // 다만 조용히 삼키지는 않는다 — 주입된 프로세스 안에서 무슨 일이 있었는지 볼 방법이 이 기록뿐이다.
+                _log?.Invoke($"Connection dropped: {ex}");
             }
         }
     }
@@ -156,6 +161,8 @@ public sealed class IpcServer
             ? IpcSerializer.DeserializePayload<SnapshotRequest>(message.Payload.Value)
             : new SnapshotRequest();
 
+        var skipped = new List<string>();
+
         var snapshot = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
             _refRegistry.Clear();
@@ -165,7 +172,7 @@ public sealed class IpcServer
             {
                 var root = _refRegistry.Resolve(request.RootRef.Value)
                     ?? throw new InvalidOperationException($"Element ref={request.RootRef} not found");
-                return _treeWalker.Walk(root, _refRegistry, request.MaxDepth);
+                return _treeWalker.Walk(root, _refRegistry, request.MaxDepth, skipped);
             }
 
             // 모든 열린 윈도우를 탐색 (다이얼로그 등 별도 Window 포함)
@@ -175,7 +182,7 @@ public sealed class IpcServer
 
             // 윈도우가 1개면 그대로 반환
             if (windows.Count == 1)
-                return _treeWalker.Walk(windows[0], _refRegistry, request.MaxDepth);
+                return _treeWalker.Walk(windows[0], _refRegistry, request.MaxDepth, skipped);
 
             // 여러 윈도우면 가상 루트 아래에 배치
             var virtualRoot = new ElementSnapshot
@@ -187,7 +194,7 @@ public sealed class IpcServer
             };
             foreach (Window window in windows)
             {
-                virtualRoot.Children.Add(_treeWalker.Walk(window, _refRegistry, request.MaxDepth));
+                virtualRoot.Children.Add(_treeWalker.Walk(window, _refRegistry, request.MaxDepth, skipped));
             }
             return virtualRoot;
         });
@@ -195,7 +202,8 @@ public sealed class IpcServer
         var response = new SnapshotResponse
         {
             Generation = _refRegistry.Generation,
-            Root = snapshot
+            Root = snapshot,
+            SkippedNodes = skipped
         };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
@@ -530,6 +538,7 @@ public sealed class IpcServer
             {
                 var result = finder.Find(window, request, _refRegistry);
                 allResults.Matches.AddRange(result.Matches);
+                allResults.SkippedNodes.AddRange(result.SkippedNodes);
             }
 
             return allResults;

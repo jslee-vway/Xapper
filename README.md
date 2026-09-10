@@ -116,17 +116,20 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 - `xapper_attach` : P/Invoke 네이티브 인젝션으로 대상 프로세스에 Inspector DLL 주입
 - `xapper_detach` : Named Pipe 연결 해제 및 정리
 - Named Pipe 기반 IPC (4바이트 LE 길이 접두사 + UTF-8 JSON)
+- 응답을 끝까지 읽지 못한 연결은 이후 메시지 경계가 어긋나므로 폐기된다. 다음 호출은 재부착을 요구하는 오류를 낸다
 
 ### **2. UI 트리 스냅샷**
 - `xapper_snapshot` : Visual Tree를 계층적 텍스트로 반환
 - 각 요소에 ref 번호 부여 (이후 조작에 사용)
 - maxDepth 파라미터로 탐색 깊이 제어
 - 다이얼로그 등 별도 Window 포함 모든 열린 윈도우 탐색
+- 순회할 수 없는 노드는 그 가지만 건너뛰고 순회를 계속하며, 건너뛴 개수를 헤더에 표시 (위치는 `format="json"`)
 
 ### **3. 요소 검색**
 - `xapper_find` : Name, AutomationId, Type, Text 기반 요소 검색
 - 트리 필터링으로 대규모 UI에서도 빠른 탐색
 - 다이얼로그 윈도우 내부 요소도 검색 가능
+- 자식 슬롯이 비어 있는 컨트롤(yFiles, DevExpress 등)을 만나도 검색이 중단되지 않는다. 그 가지만 건너뛰고 찾은 것을 모두 반환하며, 건너뛴 노드의 부모 타입·이름·깊이를 함께 보고
 
 ### **4. UI 자동 조작**
 - `xapper_click` : 버튼/요소 클릭. 좌표를 주지 않으면 AutomationPeer → RaiseEvent 폴백(빠르지만 히트테스트를 건너뛰므로 가려진 요소도 눌림), 좌표를 주면 실제 마우스 입력(사용자와 동일하지만 창이 앞에 있어야 하고 커서를 점유). 요소가 실제 마우스로 닿지 않거나 창 활성화에 실패하면 응답에 경고가 붙는다
