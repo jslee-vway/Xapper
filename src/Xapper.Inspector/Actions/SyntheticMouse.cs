@@ -54,6 +54,16 @@ internal static class SyntheticMouse
     private static GetCursorPosDelegate? _getCursorPosOrig;
     private static GetMessagePosDelegate? _getMessagePosOrig;
 
+    // 디투어 델리게이트와 후킹 엔진은 반드시 정적 필드로 붙들어 둔다. MinHook 은 이 델리게이트의 함수
+    // 포인터를 user32 에 심는데, 관리 측에 강한 참조가 없으면 GC 가 델리게이트를 수거하고, 이후 대상 앱이
+    // 후킹된 함수를 부르는 순간 "수거된 델리게이트로 콜백" 으로 CLR 이 FailFast 하며 대상 앱을 죽인다.
+    // 후킹은 프로세스 전역·무한 수명이므로 GC.KeepAlive 로는 부족하고, 프로세스가 사는 동안 계속 참조해야 한다.
+    private static HookEngine? _engine;
+    private static GetKeyStateDelegate? _getKeyStateDetour;
+    private static GetAsyncKeyStateDelegate? _getAsyncKeyStateDetour;
+    private static GetCursorPosDelegate? _getCursorPosDetour;
+    private static GetMessagePosDelegate? _getMessagePosDetour;
+
     #endregion
 
     #region Public Methods
@@ -141,6 +151,13 @@ internal static class SyntheticMouse
         return true;
     }
 
+    /// <summary>
+    /// 후크를 설치합니다(테스트 전용 진입점). 델리게이트가 GC 후에도 살아 있는지 검증하기 위해,
+    /// 클릭 없이 설치만 트리거할 수 있게 노출한다.
+    /// </summary>
+    /// <returns>후크가 설치되어 있으면 true.</returns>
+    internal static bool EnsureInstalledForTests() => EnsureInstalled();
+
     #endregion
 
     #region Private Methods
@@ -191,12 +208,19 @@ internal static class SyntheticMouse
             _installAttempted = true;
             try
             {
-                var engine = new HookEngine();
-                _getKeyStateOrig = engine.CreateHook("user32.dll", "GetKeyState", new GetKeyStateDelegate(GetKeyStateHook));
-                _getAsyncKeyStateOrig = engine.CreateHook("user32.dll", "GetAsyncKeyState", new GetAsyncKeyStateDelegate(GetAsyncKeyStateHook));
-                _getCursorPosOrig = engine.CreateHook("user32.dll", "GetCursorPos", new GetCursorPosDelegate(GetCursorPosHook));
-                _getMessagePosOrig = engine.CreateHook("user32.dll", "GetMessagePos", new GetMessagePosDelegate(GetMessagePosHook));
-                engine.EnableHooks();
+                // 디투어 델리게이트를 먼저 정적 필드에 붙들고, 그 필드에 담긴 델리게이트로만 후킹한다.
+                // (인라인으로 new 해서 넘기면 임시 객체가 GC 되어 대상 앱이 크래시한다.)
+                _engine = new HookEngine();
+                _getKeyStateDetour = GetKeyStateHook;
+                _getAsyncKeyStateDetour = GetAsyncKeyStateHook;
+                _getCursorPosDetour = GetCursorPosHook;
+                _getMessagePosDetour = GetMessagePosHook;
+
+                _getKeyStateOrig = _engine.CreateHook("user32.dll", "GetKeyState", _getKeyStateDetour);
+                _getAsyncKeyStateOrig = _engine.CreateHook("user32.dll", "GetAsyncKeyState", _getAsyncKeyStateDetour);
+                _getCursorPosOrig = _engine.CreateHook("user32.dll", "GetCursorPos", _getCursorPosDetour);
+                _getMessagePosOrig = _engine.CreateHook("user32.dll", "GetMessagePos", _getMessagePosDetour);
+                _engine.EnableHooks();
                 _installed = true;
             }
             catch

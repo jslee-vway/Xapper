@@ -29,7 +29,9 @@ public sealed class ActionTools
         "while it clicks. Only if that in-process path cannot be set up does it fall back to real mouse input, " +
         "which does move the cursor and take focus (the response names which path ran). Default to the event " +
         "mode for routine steps, and switch to x/y when the point of the test IS that a user can physically " +
-        "reach the control, or when the response warns that the element is not reachable. " +
+        "reach the control, or when the response warns that the element is not reachable. Some controls - " +
+        "notably DevExpress grids (GridControl/TableView, TreeListControl) - only change focus or selection " +
+        "for genuine mouse input, so the event mode leaves FocusedRowHandle unchanged; use x/y on those. " +
         "What the event mode does depends on the element, and the response names " +
         "the path it took - check it when a click appears to do nothing. A control with an accessibility " +
         "pattern is invoked or toggled through it, and a ButtonBase-derived control whose peer offers neither " +
