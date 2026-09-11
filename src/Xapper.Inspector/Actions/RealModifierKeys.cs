@@ -13,51 +13,10 @@ internal static class RealModifierKeys
 {
     #region Win32
 
-    private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const ushort VK_LSHIFT = 0xA0;
     private const ushort VK_LCONTROL = 0xA2;
     private const ushort VK_LMENU = 0xA4;
-
-    [DllImport("user32.dll")]
-    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-
-    // INPUT 은 type + union{MOUSEINPUT, KEYBDINPUT, HARDWAREINPUT}. cbSize 가 union 전체 크기와 맞아야 하므로
-    // 가장 큰 MOUSEINPUT 을 union 에 함께 둔다(Sequential 로 두면 x86/x64 정렬을 런타임이 맞춘다).
-    [StructLayout(LayoutKind.Sequential)]
-    private struct INPUT
-    {
-        public uint type;
-        public InputUnion u;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct InputUnion
-    {
-        [FieldOffset(0)] public MOUSEINPUT mi;
-        [FieldOffset(0)] public KEYBDINPUT ki;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MOUSEINPUT
-    {
-        public int dx;
-        public int dy;
-        public uint mouseData;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KEYBDINPUT
-    {
-        public ushort wVk;
-        public ushort wScan;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
 
     #endregion
 
@@ -93,10 +52,10 @@ internal static class RealModifierKeys
 
     private static void SendKey(ushort virtualKey, uint flags)
     {
-        var input = new INPUT { type = INPUT_KEYBOARD };
+        var input = new Win32Input.INPUT { type = Win32Input.INPUT_KEYBOARD };
         input.u.ki.wVk = virtualKey;
         input.u.ki.dwFlags = flags;
-        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        Win32Input.SendInput(1, new[] { input }, Marshal.SizeOf<Win32Input.INPUT>());
     }
 
     #endregion

@@ -15,7 +15,7 @@ public class KeyboardInputModifierTests
     [Fact]
     public void Send_CtrlZ_TriggersUndoOnTheTextBox()
     {
-        WithFocusedTextBox(box =>
+        OffscreenTextBoxes.Run(box =>
         {
             if (!InputSpoof.EnsureInstalled())
                 return;
@@ -35,7 +35,7 @@ public class KeyboardInputModifierTests
     [Fact]
     public void Send_CharacterWithCtrl_DoesNotTypeTheCharacter()
     {
-        WithFocusedTextBox(box =>
+        OffscreenTextBoxes.Run(box =>
         {
             // 후크가 없으면 Send 가 오류를 돌려주므로(실제 키를 누르지 않는다) 검증 대상이 없다.
             if (!InputSpoof.EnsureInstalled())
@@ -51,7 +51,7 @@ public class KeyboardInputModifierTests
     [Fact]
     public void Send_ShiftTab_MovesFocusBackward()
     {
-        WithFocusedTextBoxes((box, other) =>
+        OffscreenTextBoxes.Run((box, other) =>
         {
             if (!InputSpoof.EnsureInstalled())
                 return;
@@ -68,38 +68,6 @@ public class KeyboardInputModifierTests
             Assert.Same(box, Keyboard.FocusedElement);
             Assert.Equal(nameof(TextBox), focused);
             Assert.Equal(ModifierKeys.Shift, seen);
-        });
-    }
-
-    private static void WithFocusedTextBox(Action<TextBox> body)
-        => WithFocusedTextBoxes((box, _) => body(box));
-
-    private static void WithFocusedTextBoxes(Action<TextBox, TextBox> body)
-    {
-        StaThread.Run(() =>
-        {
-            var box = new TextBox();
-            var other = new TextBox();
-            var panel = new StackPanel();
-            panel.Children.Add(box);
-            panel.Children.Add(other);
-            var window = new Window
-            {
-                Content = panel, Width = 200, Height = 120,
-                Left = -10000, Top = -10000,
-                ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None
-            };
-            try
-            {
-                window.Show();
-                box.Focus();
-                body(box, other);
-            }
-            finally
-            {
-                window.Close();
-                System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeShutdown();
-            }
         });
     }
 }

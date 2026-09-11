@@ -401,6 +401,45 @@ public sealed class IpcServer
     }
 
     /// <summary>
+    /// 요소 위 한 지점의 마우스 제스처를 후킹 경로로 먼저, 안 되면 실제 입력으로 수행합니다. 우클릭·휠이 같은
+    /// 흐름(좌표 계산 → 후킹 → 전경 전환 + 실제 수식키 누름/뗌 → 경로·경고)을 쓰므로 한곳에 둔다.
+    /// </summary>
+    /// <param name="element">대상 요소.</param>
+    /// <param name="rx">요소 내 상대 X.</param>
+    /// <param name="ry">요소 내 상대 Y.</param>
+    /// <param name="modifiers">함께 누를 수식키.</param>
+    /// <param name="hooked">후킹 경로 제스처(창 핸들, 스크린 좌표 → 수행 여부).</param>
+    /// <param name="real">실제 입력 제스처(스크린 좌표).</param>
+    /// <param name="noun">경고 문구에 쓸 제스처 이름("click", "wheel").</param>
+    /// <returns>수행 경로 설명과, 필요하면 경고.</returns>
+    private static async Task<(string How, string? Warning)> RunPointGesture(
+        UIElement element, double rx, double ry, ModifierKeys modifiers,
+        Func<IntPtr, Point, bool> hooked, Action<Point> real, string noun)
+    {
+        var target = await Application.Current.Dispatcher.InvokeAsync(
+            () => (Hwnd: HwndHandleOf(element), Screen: MouseInput.ToScreenPoint(element, rx, ry)));
+
+        if (hooked(target.Hwnd, target.Screen))
+            return ("synthetic mouse input (no cursor movement)", null);
+
+        var activated = await Application.Current.Dispatcher.InvokeAsync(() => MouseInput.BringToForeground(element));
+        RealModifierKeys.Press(modifiers);
+        try
+        {
+            real(target.Screen);
+        }
+        finally
+        {
+            RealModifierKeys.Release(modifiers);
+        }
+
+        var warning = activated
+            ? null
+            : $"the target window could not be brought to the foreground, so the {noun} may not have reached the control. Bring the window to the front and retry.";
+        return ("real mouse input", warning);
+    }
+
+    /// <summary>
     /// 요소 위 한 지점을 우클릭합니다. 항상 좌표 제스처이며(접근성에 우클릭 패턴이 없다), 먼저 후킹 경로로
     /// 커서 없이 시도하고 안 되면 실제 마우스 입력으로 폴백한다. 실제 입력일 때의 수식키는 실제 키로 누르고
     /// finally 로 뗀다.
@@ -421,32 +460,12 @@ public sealed class IpcServer
 
         var rx = request.X ?? 0.5;
         var ry = request.Y ?? 0.5;
-        var target = await Application.Current.Dispatcher.InvokeAsync(
-            () => (Hwnd: HwndHandleOf(element), Screen: MouseInput.ToScreenPoint(element, rx, ry)));
 
         var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
-        string how;
-        string? warning = null;
-        if (SyntheticMouse.TryRightClick(target.Hwnd, target.Screen, modifiers))
-        {
-            how = "synthetic mouse input (no cursor movement)";
-        }
-        else
-        {
-            var activated = await Application.Current.Dispatcher.InvokeAsync(() => MouseInput.BringToForeground(element));
-            RealModifierKeys.Press(modifiers);
-            try
-            {
-                MouseInput.RightClickAt(target.Screen);
-            }
-            finally
-            {
-                RealModifierKeys.Release(modifiers);
-            }
-            how = "real mouse input";
-            if (!activated)
-                warning = "the target window could not be brought to the foreground, so the click may not have reached the control. Bring the window to the front and retry.";
-        }
+        var (how, warning) = await RunPointGesture(element, rx, ry, modifiers,
+            (hwnd, screen) => SyntheticMouse.TryRightClick(hwnd, screen, modifiers),
+            screen => MouseInput.RightClickAt(screen),
+            "click");
 
         var text = $"Right-clicked{withMods} ref={request.Ref} at ({rx:F2},{ry:F2}) via {how}";
         if (warning is not null)
@@ -484,32 +503,12 @@ public sealed class IpcServer
 
         var rx = request.X ?? 0.5;
         var ry = request.Y ?? 0.5;
-        var target = await Application.Current.Dispatcher.InvokeAsync(
-            () => (Hwnd: HwndHandleOf(element), Screen: MouseInput.ToScreenPoint(element, rx, ry)));
 
         var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
-        string how;
-        string? warning = null;
-        if (SyntheticMouse.TryWheel(target.Hwnd, target.Screen, request.Notches, modifiers))
-        {
-            how = "synthetic mouse input (no cursor movement)";
-        }
-        else
-        {
-            var activated = await Application.Current.Dispatcher.InvokeAsync(() => MouseInput.BringToForeground(element));
-            RealModifierKeys.Press(modifiers);
-            try
-            {
-                MouseInput.WheelAt(target.Screen, request.Notches);
-            }
-            finally
-            {
-                RealModifierKeys.Release(modifiers);
-            }
-            how = "real mouse input";
-            if (!activated)
-                warning = "the target window could not be brought to the foreground, so the wheel may not have reached the control. Bring the window to the front and retry.";
-        }
+        var (how, warning) = await RunPointGesture(element, rx, ry, modifiers,
+            (hwnd, screen) => SyntheticMouse.TryWheel(hwnd, screen, request.Notches, modifiers),
+            screen => MouseInput.WheelAt(screen, request.Notches),
+            "wheel");
 
         var direction = request.Notches > 0 ? "up" : "down";
         var text = $"Wheeled {Math.Abs(request.Notches)} notch(es) {direction}{withMods} on ref={request.Ref} at ({rx:F2},{ry:F2}) via {how}";

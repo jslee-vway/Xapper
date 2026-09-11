@@ -50,32 +50,18 @@ internal static class SyntheticMouse
     /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
     public static bool TryClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
     {
-        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
-            return false;
-
-        lock (Gate)
+        return RunGesture(hwnd, screen, modifiers, mk =>
         {
             var client = ToClient(hwnd, screen);
-            var mk = MkFlags(modifiers);
-            InputSpoof.BeginMouse(screen, modifiers);
-            try
-            {
-                Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, client);
-                Sleep();
-                InputSpoof.SetLeftDown(true);
-                Send(hwnd, WM_LBUTTONDOWN, (IntPtr)(mk | MK_LBUTTON), client);
-                Sleep();
-                InputSpoof.SetLeftDown(false);
-                Send(hwnd, WM_LBUTTONUP, (IntPtr)mk, client);
-                Sleep();
-            }
-            finally
-            {
-                InputSpoof.EndMouse();
-            }
-        }
-
-        return true;
+            Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, client);
+            Sleep();
+            InputSpoof.SetLeftDown(true);
+            Send(hwnd, WM_LBUTTONDOWN, (IntPtr)(mk | MK_LBUTTON), client);
+            Sleep();
+            InputSpoof.SetLeftDown(false);
+            Send(hwnd, WM_LBUTTONUP, (IntPtr)mk, client);
+            Sleep();
+        });
     }
 
     /// <summary>지정된 창의 한 지점을 커서 이동 없이 더블클릭합니다(누름-뗌 두 번, WPF 가 ClickCount=2 로 인식).</summary>
@@ -85,35 +71,21 @@ internal static class SyntheticMouse
     /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
     public static bool TryDoubleClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
     {
-        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
-            return false;
-
-        lock (Gate)
+        return RunGesture(hwnd, screen, modifiers, mk =>
         {
             var client = ToClient(hwnd, screen);
-            var mk = MkFlags(modifiers);
-            InputSpoof.BeginMouse(screen, modifiers);
-            try
+            Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, client);
+            Sleep();
+            for (var i = 0; i < 2; i++)
             {
-                Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, client);
+                InputSpoof.SetLeftDown(true);
+                Send(hwnd, WM_LBUTTONDOWN, (IntPtr)(mk | MK_LBUTTON), client);
                 Sleep();
-                for (var i = 0; i < 2; i++)
-                {
-                    InputSpoof.SetLeftDown(true);
-                    Send(hwnd, WM_LBUTTONDOWN, (IntPtr)(mk | MK_LBUTTON), client);
-                    Sleep();
-                    InputSpoof.SetLeftDown(false);
-                    Send(hwnd, WM_LBUTTONUP, (IntPtr)mk, client);
-                    Sleep();
-                }
+                InputSpoof.SetLeftDown(false);
+                Send(hwnd, WM_LBUTTONUP, (IntPtr)mk, client);
+                Sleep();
             }
-            finally
-            {
-                InputSpoof.EndMouse();
-            }
-        }
-
-        return true;
+        });
     }
 
     /// <summary>
@@ -126,32 +98,18 @@ internal static class SyntheticMouse
     /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없으면 false.</returns>
     public static bool TryRightClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
     {
-        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
-            return false;
-
-        lock (Gate)
+        return RunGesture(hwnd, screen, modifiers, mk =>
         {
             var client = ToClient(hwnd, screen);
-            var mk = MkFlags(modifiers);
-            InputSpoof.BeginMouse(screen, modifiers);
-            try
-            {
-                Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, client);
-                Sleep();
-                InputSpoof.SetRightDown(true);
-                Send(hwnd, WM_RBUTTONDOWN, (IntPtr)(mk | MK_RBUTTON), client);
-                Sleep();
-                InputSpoof.SetRightDown(false);
-                Send(hwnd, WM_RBUTTONUP, (IntPtr)mk, client);
-                Sleep();
-            }
-            finally
-            {
-                InputSpoof.EndMouse();
-            }
-        }
-
-        return true;
+            Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, client);
+            Sleep();
+            InputSpoof.SetRightDown(true);
+            Send(hwnd, WM_RBUTTONDOWN, (IntPtr)(mk | MK_RBUTTON), client);
+            Sleep();
+            InputSpoof.SetRightDown(false);
+            Send(hwnd, WM_RBUTTONUP, (IntPtr)mk, client);
+            Sleep();
+        });
     }
 
     /// <summary>
@@ -164,27 +122,14 @@ internal static class SyntheticMouse
     /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없으면 false.</returns>
     public static bool TryWheel(IntPtr hwnd, Point screen, int notches, ModifierKeys modifiers = ModifierKeys.None)
     {
-        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
-            return false;
-
-        lock (Gate)
+        return RunGesture(hwnd, screen, modifiers, mk =>
         {
-            InputSpoof.BeginMouse(screen, modifiers);
-            try
-            {
-                Send(hwnd, WM_MOUSEMOVE, (IntPtr)MkFlags(modifiers), ToClient(hwnd, screen));
-                Sleep();
-                var (wParam, lParam) = PackWheel(notches, modifiers, screen);
-                Send(hwnd, WM_MOUSEWHEEL, wParam, lParam);
-                Sleep();
-            }
-            finally
-            {
-                InputSpoof.EndMouse();
-            }
-        }
-
-        return true;
+            Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, ToClient(hwnd, screen));
+            Sleep();
+            var (wParam, lParam) = PackWheel(notches, modifiers, screen);
+            Send(hwnd, WM_MOUSEWHEEL, wParam, lParam);
+            Sleep();
+        });
     }
 
     /// <summary>지정된 창에서 한 지점을 누른 채 다른 지점까지 끌고 뗍니다. 커서는 움직이지 않습니다.</summary>
@@ -195,43 +140,29 @@ internal static class SyntheticMouse
     /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
     public static bool TryDrag(IntPtr hwnd, Point start, Point end, ModifierKeys modifiers = ModifierKeys.None)
     {
-        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
-            return false;
-
-        lock (Gate)
+        return RunGesture(hwnd, start, modifiers, mk =>
         {
-            var mk = MkFlags(modifiers);
-            InputSpoof.BeginMouse(start, modifiers);
-            try
+            Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, ToClient(hwnd, start));
+            Sleep();
+            InputSpoof.SetLeftDown(true);
+            Send(hwnd, WM_LBUTTONDOWN, (IntPtr)(mk | MK_LBUTTON), ToClient(hwnd, start));
+            Sleep();
+
+            for (var step = 1; step <= DragSteps; step++)
             {
-                Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, ToClient(hwnd, start));
-                Sleep();
-                InputSpoof.SetLeftDown(true);
-                Send(hwnd, WM_LBUTTONDOWN, (IntPtr)(mk | MK_LBUTTON), ToClient(hwnd, start));
-                Sleep();
-
-                for (var step = 1; step <= DragSteps; step++)
-                {
-                    var progress = (double)step / DragSteps;
-                    var point = new Point(
-                        start.X + (end.X - start.X) * progress,
-                        start.Y + (end.Y - start.Y) * progress);
-                    InputSpoof.SetPosition(point);
-                    Send(hwnd, WM_MOUSEMOVE, (IntPtr)(mk | MK_LBUTTON), ToClient(hwnd, point));
-                    Sleep();
-                }
-
-                InputSpoof.SetLeftDown(false);
-                Send(hwnd, WM_LBUTTONUP, (IntPtr)mk, ToClient(hwnd, end));
+                var progress = (double)step / DragSteps;
+                var point = new Point(
+                    start.X + (end.X - start.X) * progress,
+                    start.Y + (end.Y - start.Y) * progress);
+                InputSpoof.SetPosition(point);
+                Send(hwnd, WM_MOUSEMOVE, (IntPtr)(mk | MK_LBUTTON), ToClient(hwnd, point));
                 Sleep();
             }
-            finally
-            {
-                InputSpoof.EndMouse();
-            }
-        }
 
-        return true;
+            InputSpoof.SetLeftDown(false);
+            Send(hwnd, WM_LBUTTONUP, (IntPtr)mk, ToClient(hwnd, end));
+            Sleep();
+        });
     }
 
     /// <summary>
@@ -254,6 +185,36 @@ internal static class SyntheticMouse
     #endregion
 
     #region Private Methods
+
+    /// <summary>
+    /// 스푸프를 켜고 잠금 안에서 제스처 본문을 실행한 뒤 반드시 스푸프를 끕니다. 다섯 제스처가 같은 골격을 쓰므로
+    /// 가드·잠금·Begin/End 짝을 한곳에서 보장한다.
+    /// </summary>
+    /// <param name="hwnd">대상 창 핸들. 0 이면 false.</param>
+    /// <param name="screen">스푸프할 커서 시작 위치.</param>
+    /// <param name="modifiers">눌린 것으로 볼 수식키.</param>
+    /// <param name="body">WM 메시지를 보내는 본문. 인자는 수식키의 MK 플래그.</param>
+    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없으면 false.</returns>
+    private static bool RunGesture(IntPtr hwnd, Point screen, ModifierKeys modifiers, Action<int> body)
+    {
+        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
+            return false;
+
+        lock (Gate)
+        {
+            InputSpoof.BeginMouse(screen, modifiers);
+            try
+            {
+                body(MkFlags(modifiers));
+            }
+            finally
+            {
+                InputSpoof.EndMouse();
+            }
+        }
+
+        return true;
+    }
 
     private static void Sleep() => Thread.Sleep(StepDelayMs);
 

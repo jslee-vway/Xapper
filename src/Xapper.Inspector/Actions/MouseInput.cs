@@ -21,33 +21,11 @@ internal static class MouseInput
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
-    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-
-    [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int nIndex);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct INPUT
-    {
-        public uint type;
-        public MOUSEINPUT mi;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MOUSEINPUT
-    {
-        public int dx;
-        public int dy;
-        public uint mouseData;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
-
-    private const uint INPUT_MOUSE = 0;
     private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
     private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
@@ -150,17 +128,7 @@ internal static class MouseInput
     /// <param name="screenPoint">클릭할 스크린 좌표.</param>
     public static void ClickAt(Point screenPoint)
     {
-        var (x, y) = ToVirtualDesktop(screenPoint);
-        var flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-
-        var inputs = new[]
-        {
-            CreateInput(x, y, flags | MOUSEEVENTF_MOVE),
-            CreateInput(x, y, flags | MOUSEEVENTF_LEFTDOWN),
-            CreateInput(x, y, flags | MOUSEEVENTF_LEFTUP)
-        };
-
-        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        SendBatch(BuildBatch(screenPoint, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP));
     }
 
     /// <summary>
@@ -170,36 +138,15 @@ internal static class MouseInput
     /// <param name="screenPoint">더블클릭할 스크린 좌표.</param>
     public static void DoubleClickAt(Point screenPoint)
     {
-        var (x, y) = ToVirtualDesktop(screenPoint);
-        var flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-
-        var inputs = new[]
-        {
-            CreateInput(x, y, flags | MOUSEEVENTF_MOVE),
-            CreateInput(x, y, flags | MOUSEEVENTF_LEFTDOWN),
-            CreateInput(x, y, flags | MOUSEEVENTF_LEFTUP),
-            CreateInput(x, y, flags | MOUSEEVENTF_LEFTDOWN),
-            CreateInput(x, y, flags | MOUSEEVENTF_LEFTUP)
-        };
-
-        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        SendBatch(BuildBatch(screenPoint,
+            MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP));
     }
 
     /// <summary>지정된 스크린 좌표에서 오른쪽 버튼을 누르고 뗍니다(이동·누름·뗌을 한 번의 SendInput 으로).</summary>
     /// <param name="screenPoint">우클릭할 스크린 좌표.</param>
     public static void RightClickAt(Point screenPoint)
     {
-        var (x, y) = ToVirtualDesktop(screenPoint);
-        var flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-
-        var inputs = new[]
-        {
-            CreateInput(x, y, flags | MOUSEEVENTF_MOVE),
-            CreateInput(x, y, flags | MOUSEEVENTF_RIGHTDOWN),
-            CreateInput(x, y, flags | MOUSEEVENTF_RIGHTUP)
-        };
-
-        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        SendBatch(BuildBatch(screenPoint, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP));
     }
 
     /// <summary>지정된 스크린 좌표로 이동한 뒤 휠을 굴립니다. 양수는 위(앞), 음수는 아래(뒤).</summary>
@@ -207,14 +154,9 @@ internal static class MouseInput
     /// <param name="notches">굴릴 눈금 수(부호가 방향).</param>
     public static void WheelAt(Point screenPoint, int notches)
     {
-        var (x, y) = ToVirtualDesktop(screenPoint);
-        var flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-
-        var wheel = CreateInput(x, y, flags | MOUSEEVENTF_WHEEL);
-        wheel.mi.mouseData = unchecked((uint)(notches * WheelDelta));
-
-        var inputs = new[] { CreateInput(x, y, flags | MOUSEEVENTF_MOVE), wheel };
-        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        var inputs = BuildBatch(screenPoint, MOUSEEVENTF_WHEEL);
+        inputs[1].u.mi.mouseData = unchecked((uint)(notches * WheelDelta));
+        SendBatch(inputs);
     }
 
     /// <summary>지정된 스크린 좌표로 마우스 포인터를 이동시킵니다.</summary>
@@ -244,6 +186,25 @@ internal static class MouseInput
         return VisualTreeHelper.GetParent(node);
     }
 
+    /// <summary>이동 입력 뒤에 지정된 동작들을 이어 붙인 INPUT 배열을 만듭니다. 좌표는 모든 항목에 담겨 타이밍 이슈가 없다.</summary>
+    private static Win32Input.INPUT[] BuildBatch(Point screenPoint, params uint[] actions)
+    {
+        var (x, y) = ToVirtualDesktop(screenPoint);
+        var flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+
+        var inputs = new Win32Input.INPUT[actions.Length + 1];
+        inputs[0] = CreateInput(x, y, flags | MOUSEEVENTF_MOVE);
+        for (var i = 0; i < actions.Length; i++)
+            inputs[i + 1] = CreateInput(x, y, flags | actions[i]);
+        return inputs;
+    }
+
+    /// <summary>한 번의 SendInput 호출로 배열 전체를 원자적으로 보냅니다.</summary>
+    private static void SendBatch(Win32Input.INPUT[] inputs)
+    {
+        Win32Input.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Win32Input.INPUT>());
+    }
+
     /// <summary>
     /// 지정된 동작 플래그로 단일 마우스 입력을 전송합니다.
     /// </summary>
@@ -251,7 +212,7 @@ internal static class MouseInput
     {
         var (x, y) = ToVirtualDesktop(screenPoint);
         var input = CreateInput(x, y, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | actionFlag);
-        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        Win32Input.SendInput(1, new[] { input }, Marshal.SizeOf<Win32Input.INPUT>());
     }
 
     /// <summary>
@@ -271,12 +232,12 @@ internal static class MouseInput
     /// <summary>
     /// 지정된 절대 좌표와 플래그를 담은 마우스 INPUT 구조체를 만듭니다.
     /// </summary>
-    private static INPUT CreateInput(int absoluteX, int absoluteY, uint flags)
+    private static Win32Input.INPUT CreateInput(int absoluteX, int absoluteY, uint flags)
     {
-        var input = new INPUT { type = INPUT_MOUSE };
-        input.mi.dx = absoluteX;
-        input.mi.dy = absoluteY;
-        input.mi.dwFlags = flags;
+        var input = new Win32Input.INPUT { type = Win32Input.INPUT_MOUSE };
+        input.u.mi.dx = absoluteX;
+        input.u.mi.dy = absoluteY;
+        input.u.mi.dwFlags = flags;
         return input;
     }
 
