@@ -363,9 +363,13 @@ public sealed class IpcServer
             var target = await Application.Current.Dispatcher.InvokeAsync(
                 () => (Hwnd: HwndHandleOf(element), Screen: MouseInput.ToScreenPoint(element, request.X.Value, request.Y.Value)));
 
-            if (SyntheticMouse.TryClick(target.Hwnd, target.Screen))
+            var hooked = request.DoubleClick
+                ? SyntheticMouse.TryDoubleClick(target.Hwnd, target.Screen)
+                : SyntheticMouse.TryClick(target.Hwnd, target.Screen);
+            if (hooked)
             {
-                var hookText = $"Clicked ref={request.Ref} at ({request.X:F2},{request.Y:F2}) " +
+                var hookVerb = request.DoubleClick ? "Double-clicked" : "Clicked";
+                var hookText = $"{hookVerb} ref={request.Ref} at ({request.X:F2},{request.Y:F2}) " +
                                "via synthetic mouse input (no cursor movement)";
                 return IpcSerializer.CreateResponse(message.Id,
                     new ActionResponse { Success = true, Message = await SettleAsync(hookText, request.Timeout) });
@@ -374,12 +378,13 @@ public sealed class IpcServer
         }
 
         var outcome = await Application.Current.Dispatcher.InvokeAsync(
-            () => ClickAction.Execute(element, request.X, request.Y));
+            () => ClickAction.Execute(element, request.X, request.Y, request.DoubleClick));
 
         var posInfo = request.X.HasValue && request.Y.HasValue
             ? $" at ({request.X:F2},{request.Y:F2})"
             : "";
-        var text = $"Clicked ref={request.Ref}{posInfo} via {outcome.Path}";
+        var verb = request.DoubleClick ? "Double-clicked" : "Clicked";
+        var text = $"{verb} ref={request.Ref}{posInfo} via {outcome.Path}";
         if (outcome.Warning is not null)
             text += $" | {outcome.Warning}";
 

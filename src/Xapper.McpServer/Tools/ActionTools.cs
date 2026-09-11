@@ -45,7 +45,8 @@ public sealed class ActionTools
         "answering; when it returns the application has processed the click, unless the response says it was " +
         "still busy. There is no double-click: two coordinate clicks in a row may not register as one, " +
         "because the interval between calls exceeds the system double-click time. The response also warns " +
-        "when the element is unreachable by a real mouse, or when the window could not be activated.")]
+        "when the element is unreachable by a real mouse, or when the window could not be activated. " +
+        "To double-click, use xapper_doubleclick instead.")]
     public async Task<string> Click(
         [Description("Element ref from last snapshot")] int @ref,
         [Description("Relative X position within element (0.0=left, 1.0=right). Omit for event-based click.")] double? x = null,
@@ -58,13 +59,41 @@ public sealed class ActionTools
                    "to let the element be driven through its own events.";
 
         var client = _sessionManager.GetActive();
-        var response = await client.ClickAsync(@ref, timeout, x, y, ct);
+        var response = await client.ClickAsync(@ref, timeout, x, y, doubleClick: false, ct: ct);
 
         if (response.Type == "error")
             return $"Error: {response.Payload}";
 
         var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
         return result.Success ? result.Message ?? "Click succeeded" : $"Failed: {result.Error}";
+    }
+
+    [McpServerTool(Name = "xapper_doubleclick"), Description(
+        "Double-click a point inside a UI element by ref. A double-click is a gesture AT a location - for " +
+        "example double-clicking a grid row or cell to open its editor, or a list item to activate it - so x " +
+        "and y are required (unlike xapper_click, there is no event-based double-click). The point goes through " +
+        "real hit-testing like a user would, hitting whatever is on top. It normally drives the mouse from " +
+        "INSIDE the target process, moving neither the physical cursor nor the keyboard focus, so you can keep " +
+        "working while it clicks; only if that in-process path cannot be set up does it fall back to real mouse " +
+        "input, which moves the cursor and takes focus (the response names which path ran). The two presses are " +
+        "sent close enough together that the application registers them as one double-click - two separate " +
+        "xapper_click calls cannot guarantee this, because the gap between calls can exceed the system " +
+        "double-click time. For keyboard-driven ways to open an editor (such as F2), use xapper_key instead.")]
+    public async Task<string> DoubleClick(
+        [Description("Element ref from last snapshot")] int @ref,
+        [Description("Relative X position within element (0.0=left, 1.0=right)")] double x,
+        [Description("Relative Y position within element (0.0=top, 1.0=bottom)")] double y,
+        [Description("Timeout in ms (default 5000). Spent twice - first waiting for the element to be ready, then bounding the wait for the double-click to be processed - so the worst case is about double this value")] int timeout = 5000,
+        CancellationToken ct = default)
+    {
+        var client = _sessionManager.GetActive();
+        var response = await client.ClickAsync(@ref, timeout, x, y, doubleClick: true, ct: ct);
+
+        if (response.Type == "error")
+            return $"Error: {response.Payload}";
+
+        var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
+        return result.Success ? result.Message ?? "Double-click succeeded" : $"Failed: {result.Error}";
     }
 
     [McpServerTool(Name = "xapper_type"), Description("Type text into a TextBox or editable element by ref")]
@@ -91,7 +120,9 @@ public sealed class ActionTools
         "person is doing - this routes the key to the application's own Keyboard.FocusedElement, so it works " +
         "no matter which window is in front and the person can keep working. Use it for keys the mouse cannot " +
         "express: F2 to open a grid cell editor, Enter to commit, Escape to cancel, Tab to move focus, arrow " +
-        "keys to navigate, and single characters to type. key is a WPF Key name (\"F2\", \"Enter\", \"Escape\", " +
+        "keys to navigate, and single characters to type. This sends exactly ONE keystroke per call - a single " +
+        "character or one named key; to type a whole string use xapper_type instead (a multi-character value " +
+        "here is rejected). key is a WPF Key name (\"F2\", \"Enter\", \"Escape\", " +
         "\"Tab\", \"Down\") or a single printable character (\"a\", \"7\") which is typed as text. Pass ref to " +
         "focus that element first; omit it to send to whatever currently has focus (for example the cell you " +
         "just clicked). The response names the key and the element that holds focus afterwards. Modifiers " +

@@ -157,6 +157,28 @@ internal static class MouseInput
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
     }
 
+    /// <summary>
+    /// 같은 지점에서 누름-뗌을 두 번 반복해 더블클릭을 전송합니다. 한 번의 SendInput 호출로 보내므로
+    /// 두 클릭 사이 간격이 시스템 더블클릭 시간 안에 들어가, OS 가 더블클릭으로 인식합니다.
+    /// </summary>
+    /// <param name="screenPoint">더블클릭할 스크린 좌표.</param>
+    public static void DoubleClickAt(Point screenPoint)
+    {
+        var (x, y) = ToVirtualDesktop(screenPoint);
+        var flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+
+        var inputs = new[]
+        {
+            CreateInput(x, y, flags | MOUSEEVENTF_MOVE),
+            CreateInput(x, y, flags | MOUSEEVENTF_LEFTDOWN),
+            CreateInput(x, y, flags | MOUSEEVENTF_LEFTUP),
+            CreateInput(x, y, flags | MOUSEEVENTF_LEFTDOWN),
+            CreateInput(x, y, flags | MOUSEEVENTF_LEFTUP)
+        };
+
+        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+    }
+
     /// <summary>지정된 스크린 좌표로 마우스 포인터를 이동시킵니다.</summary>
     /// <param name="screenPoint">이동할 스크린 좌표.</param>
     public static void MoveTo(Point screenPoint) => Send(screenPoint, MOUSEEVENTF_MOVE);

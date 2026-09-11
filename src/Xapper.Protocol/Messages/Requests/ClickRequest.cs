@@ -16,4 +16,7 @@ public sealed class ClickRequest
 
     /// <summary>요소 내 상대 Y 좌표 (0.0~1.0 비율). null이면 중앙 클릭.</summary>
     public double? Y { get; set; }
+
+    /// <summary>true면 같은 지점을 연속 두 번 눌러 더블클릭한다. 좌표(X/Y)가 있어야 한다.</summary>
+    public bool DoubleClick { get; set; }
 }

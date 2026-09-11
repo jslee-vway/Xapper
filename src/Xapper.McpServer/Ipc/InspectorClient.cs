@@ -117,9 +117,9 @@ public sealed class InspectorClient : IAsyncDisposable
     }
 
     /// <summary>UI 요소를 클릭합니다.</summary>
-    public async Task<IpcMessage> ClickAsync(int @ref, int timeout = 5000, double? x = null, double? y = null, CancellationToken ct = default)
+    public async Task<IpcMessage> ClickAsync(int @ref, int timeout = 5000, double? x = null, double? y = null, bool doubleClick = false, CancellationToken ct = default)
     {
-        var payload = new { @ref, timeout, x, y };
+        var payload = new { @ref, timeout, x, y, doubleClick };
         var request = IpcSerializer.CreateRequest("click", payload);
         return await SendAsync(request, ct);
     }

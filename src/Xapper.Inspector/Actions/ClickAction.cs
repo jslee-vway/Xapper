@@ -55,12 +55,13 @@ public static class ClickAction
     /// <param name="element">클릭할 대상 요소.</param>
     /// <param name="relativeX">요소 내 상대 X 좌표 (0.0~1.0). null이면 기본 클릭.</param>
     /// <param name="relativeY">요소 내 상대 Y 좌표 (0.0~1.0). null이면 기본 클릭.</param>
+    /// <param name="doubleClick">true면 좌표 지점을 더블클릭한다(좌표 지정 시에만 유효).</param>
     /// <returns>수행된 클릭 경로와, 주의가 필요하면 경고 문구.</returns>
-    public static ClickOutcome Execute(UIElement element, double? relativeX = null, double? relativeY = null)
+    public static ClickOutcome Execute(UIElement element, double? relativeX = null, double? relativeY = null, bool doubleClick = false)
     {
         // 좌표가 지정된 경우: SendInput(ABSOLUTE)으로 원자적 마우스 클릭
         if (relativeX.HasValue && relativeY.HasValue)
-            return ClickAtPosition(element, relativeX.Value, relativeY.Value);
+            return ClickAtPosition(element, relativeX.Value, relativeY.Value, doubleClick);
 
         var path = RaiseClick(element);
 
@@ -126,11 +127,14 @@ public static class ClickAction
     /// <summary>
     /// 요소 내 상대 좌표를 스크린 좌표로 변환하고, 대상 윈도우를 포그라운드로 올린 뒤 클릭합니다.
     /// </summary>
-    private static ClickOutcome ClickAtPosition(UIElement element, double relativeX, double relativeY)
+    private static ClickOutcome ClickAtPosition(UIElement element, double relativeX, double relativeY, bool doubleClick)
     {
         var screenPoint = MouseInput.ToScreenPoint(element, relativeX, relativeY);
         var activated = MouseInput.BringToForeground(element);
-        MouseInput.ClickAt(screenPoint);
+        if (doubleClick)
+            MouseInput.DoubleClickAt(screenPoint);
+        else
+            MouseInput.ClickAt(screenPoint);
         return new ClickOutcome(RealMouseInputPath, activated ? null : NotForegroundWarning);
     }
 

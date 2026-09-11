@@ -104,6 +104,45 @@ internal static class SyntheticMouse
     }
 
     /// <summary>
+    /// 지정된 창의 한 지점을 커서 이동 없이 더블클릭합니다. 누름-뗌을 짧은 간격으로 두 번 보내,
+    /// WPF 가 두 클릭 사이 간격을 보고 ClickCount=2 로 인식하게 합니다.
+    /// </summary>
+    /// <param name="hwnd">대상 요소가 속한 최상위 창(HwndSource) 핸들.</param>
+    /// <param name="screen">더블클릭할 스크린 디바이스 좌표.</param>
+    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
+    public static bool TryDoubleClick(IntPtr hwnd, Point screen)
+    {
+        if (hwnd == IntPtr.Zero || !EnsureInstalled())
+            return false;
+
+        lock (Gate)
+        {
+            var client = ToClient(hwnd, screen);
+            Begin(screen);
+            try
+            {
+                Send(hwnd, WM_MOUSEMOVE, IntPtr.Zero, client);
+                Sleep();
+                for (var i = 0; i < 2; i++)
+                {
+                    _lDown = true;
+                    Send(hwnd, WM_LBUTTONDOWN, (IntPtr)MK_LBUTTON, client);
+                    Sleep();
+                    _lDown = false;
+                    Send(hwnd, WM_LBUTTONUP, IntPtr.Zero, client);
+                    Sleep();
+                }
+            }
+            finally
+            {
+                End();
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// 지정된 창에서 한 지점을 누른 채 다른 지점까지 끌고 뗍니다. 커서는 움직이지 않습니다.
     /// </summary>
     /// <param name="hwnd">대상 요소가 속한 최상위 창(HwndSource) 핸들.</param>
