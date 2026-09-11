@@ -84,4 +84,35 @@ public sealed class ActionTools
         var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
         return result.Success ? result.Message ?? "Type succeeded" : $"Failed: {result.Error}";
     }
+
+    [McpServerTool(Name = "xapper_key"), Description(
+        "Send a keystroke to the target's keyboard focus, driven from INSIDE the target process. Unlike " +
+        "sending keys to the OS - which go to whatever window is in the foreground and leak into whatever the " +
+        "person is doing - this routes the key to the application's own Keyboard.FocusedElement, so it works " +
+        "no matter which window is in front and the person can keep working. Use it for keys the mouse cannot " +
+        "express: F2 to open a grid cell editor, Enter to commit, Escape to cancel, Tab to move focus, arrow " +
+        "keys to navigate, and single characters to type. key is a WPF Key name (\"F2\", \"Enter\", \"Escape\", " +
+        "\"Tab\", \"Down\") or a single printable character (\"a\", \"7\") which is typed as text. Pass ref to " +
+        "focus that element first; omit it to send to whatever currently has focus (for example the cell you " +
+        "just clicked). The response names the key and the element that holds focus afterwards. Modifiers " +
+        "(Ctrl/Shift/Alt) are not supported yet - WPF reads their state from the OS keyboard, which cannot be " +
+        "set from inside the process, so a synthesized modifier does not register; send the base key without " +
+        "them. This is also how xapper_type differs: type assigns a value; xapper_key drives the real key " +
+        "pipeline (needed for editors that only open on a key like F2).")]
+    public async Task<string> Key(
+        [Description("Key to send: a WPF Key name (F2, Enter, Escape, Tab, Down) or a single printable character")] string key,
+        [Description("Modifier combination (Ctrl/Shift/Alt) - not supported yet; omit")] string? modifiers = null,
+        [Description("Element ref to focus first (omit to send to the currently focused element)")] int? @ref = null,
+        [Description("Timeout in ms (default 5000)")] int timeout = 5000,
+        CancellationToken ct = default)
+    {
+        var client = _sessionManager.GetActive();
+        var response = await client.KeyAsync(key, modifiers, @ref, timeout, ct);
+
+        if (response.Type == "error")
+            return $"Error: {response.Payload}";
+
+        var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
+        return result.Success ? result.Message ?? "Key sent" : $"Failed: {result.Error}";
+    }
 }

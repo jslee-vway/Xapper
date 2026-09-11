@@ -132,6 +132,14 @@ public sealed class InspectorClient : IAsyncDisposable
         return await SendAsync(request, ct);
     }
 
+    /// <summary>키보드 포커스 요소(또는 지정 ref)에 키를 넣습니다. 전경 창과 무관하게 대상 앱 안에서 라우팅합니다.</summary>
+    public async Task<IpcMessage> KeyAsync(string key, string? modifiers = null, int? @ref = null, int timeout = 5000, CancellationToken ct = default)
+    {
+        var payload = new { key, modifiers, @ref, timeout };
+        var request = IpcSerializer.CreateRequest("key", payload);
+        return await SendAsync(request, ct);
+    }
+
     /// <summary>Selector 컨트롤에서 항목을 선택합니다.</summary>
     public async Task<IpcMessage> SelectAsync(int @ref, string? itemText = null, int? itemIndex = null, int timeout = 5000, CancellationToken ct = default)
     {

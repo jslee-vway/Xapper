@@ -97,7 +97,7 @@ src/
 ├── Xapper.Protocol        IPC 메시지 계약 (net6.0~9.0-windows, WPF 무의존)
 ├── Xapper.Injector        네이티브 인젝터 (P/Invoke로 DLL 주입)
 ├── Xapper.Inspector       인젝션 라이브러리 (net6.0~9.0-windows 멀티타겟)
-└── Xapper.McpServer       MCP 서버 (stdio transport, 15개 도구)
+└── Xapper.McpServer       MCP 서버 (stdio transport, 18개 도구)
 tests/
 ├── Xapper.TestApp         샘플 WPF 로그인 폼
 └── Xapper.Tests           단위 테스트 (xUnit)
@@ -139,8 +139,9 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 
 ### **4. UI 자동 조작**
 - `xapper_click` : 버튼/요소 클릭. 좌표를 주지 않으면 AutomationPeer → RaiseEvent 폴백(빠르지만 히트테스트를 건너뛰므로 가려진 요소도 눌림), 좌표를 주면 그 지점을 실제 히트테스트를 거쳐 클릭한다. 기본은 대상 프로세스 안에서 몰아(user32 후킹 + WM 메시지) 실제 커서·포커스를 건드리지 않으므로 작업 중에도 쓸 수 있고, 그 경로를 설치할 수 없을 때만 실제 마우스 입력으로 폴백한다. 어느 경로였는지(synthetic / real mouse input)가 응답에 표시되며, 접근성 경로는 큐가 비워질 때까지 기다렸다가 반환한다
-  - 상대 좌표 지정 시 SendInput으로 위치 기반 클릭 (듀얼 모니터/DPI 대응). **기본은 사용자에게 물어본 뒤에만 수행** — 물리 커서를 옮기고 대상 창에 포커스를 넘겨 사용자의 작업을 끊기 때문
+  - 후킹 경로가 안 될 때의 폴백만 SendInput으로 위치 기반 클릭 (듀얼 모니터/DPI 대응) — 이 경우에만 물리 커서를 옮기고 대상 창에 포커스를 넘긴다
 - `xapper_type` : TextBox에 텍스트 입력
+- `xapper_key` : 대상 프로세스 안에서 키 입력(F2/Enter/Escape/Tab/화살표/한 글자). 전경 창과 무관하게 대상 앱의 키보드 포커스 요소로 라우팅하므로, 사용자가 앞 창에서 딴 일을 해도 키가 새지 않는다. ref 를 주면 먼저 그 요소에 포커스. 수식키(Ctrl/Shift/Alt)는 현재 미지원(WPF 가 OS 키보드 상태를 읽어 합성 불가). 편집기가 키(F2)로만 열리는 컨트롤에 쓴다
 - `xapper_select` : ComboBox/ListBox 항목 선택
 - `xapper_toggle` : CheckBox/ToggleButton 토글
 - `xapper_expand` : TreeViewItem/Expander 펼치기/접기
@@ -270,6 +271,7 @@ AI 에이전트가 자동으로 수행하는 흐름:
 | `xapper_element_at` | 좌표의 요소 조회 | `x`, `y`, `maxAncestors` (선택) |
 | `xapper_click` | 클릭 | `ref`, `x`, `y` (모두 선택) |
 | `xapper_type` | 텍스트 입력 | `ref`, `text` |
+| `xapper_key` | 키 입력 | `key`, `modifiers`(미지원), `ref`(선택) |
 | `xapper_select` | 항목 선택 | `ref`, `item` |
 | `xapper_toggle` | 토글 | `ref` |
 | `xapper_expand` | 펼치기/접기 | `ref`, `expand` |

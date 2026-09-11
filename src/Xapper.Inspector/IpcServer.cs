@@ -240,6 +240,7 @@ public sealed class IpcServer
                 "snapshot" => await HandleSnapshot(message),
                 "click" => await HandleClick(message),
                 "type" => await HandleType(message),
+                "key" => await HandleKey(message),
                 "select" => await HandleSelect(message),
                 "toggle" => await HandleToggle(message),
                 "expand" => await HandleExpand(message),
@@ -422,6 +423,34 @@ public sealed class IpcServer
             Message = await SettleAsync($"Typed into ref={request.Ref}", request.Timeout)
         };
         return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
+    /// 키보드 포커스 요소(또는 지정 요소)에 키를 넣습니다. 전경 창과 무관하게 대상 앱 안에서 라우팅한다.
+    /// </summary>
+    private async Task<IpcMessage> HandleKey(IpcMessage message)
+    {
+        var request = IpcSerializer.DeserializePayload<KeyRequest>(message.Payload!.Value);
+
+        DependencyObject? refElement = null;
+        if (request.Ref is { } elementRef)
+        {
+            if (!TryResolveRef(elementRef, message.Id, out refElement, out var error))
+                return error;
+
+            var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
+            if (!await waiter.WaitForReady(refElement))
+                return NotReadyError(message.Id, elementRef, request.Timeout);
+        }
+
+        var (keyError, focused) = await Application.Current.Dispatcher.InvokeAsync(
+            () => KeyboardInput.Send(refElement, request.Key, request.Modifiers));
+        if (keyError is not null)
+            return IpcSerializer.CreateError(message.Id, keyError);
+
+        var text = $"{request.Key} sent -> {focused} now focused";
+        return IpcSerializer.CreateResponse(message.Id,
+            new ActionResponse { Success = true, Message = await SettleAsync(text, request.Timeout) });
     }
 
     /// <summary>
