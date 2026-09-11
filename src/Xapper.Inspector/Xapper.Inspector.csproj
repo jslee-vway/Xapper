@@ -4,10 +4,19 @@
     <TargetFramework />
     <TargetFrameworks>net6.0-windows;net7.0-windows;net8.0-windows;net9.0-windows</TargetFrameworks>
     <UseWPF>true</UseWPF>
+    <!-- 라이브러리는 기본적으로 NuGet 어셈블리를 bin 에 복사하지 않는다. 주입 페이로드에 MinHook.NET.dll 을
+         담으려면 각 TFM bin 에 실제로 놓여야 하므로 복사를 켠다. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Xapper.Protocol\Xapper.Protocol.csproj" />
+  </ItemGroup>
+
+  <!-- 대상 프로세스 안에서 user32 를 짧게 후킹해 실제 커서 없이 클릭·드래그하기 위한 인라인 후킹 라이브러리.
+       modern TFM 에서 의존성 없는 단일 DLL 이며, 주입 페이로드에 함께 추출된다. -->
+  <ItemGroup>
+    <PackageReference Include="MinHook.NET" Version="1.1.2" />
   </ItemGroup>
 
   <!-- 내부 헬퍼를 공개 API로 올리지 않고 테스트에서 직접 검증하기 위함 -->

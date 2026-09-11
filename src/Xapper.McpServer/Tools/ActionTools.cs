@@ -23,12 +23,13 @@ public sealed class ActionTools
         "WITHOUT x/y: uses the accessibility Invoke pattern and raised events. Fast, does not move the physical " +
         "cursor, and works even when the window is not in front - but it SKIPS hit-testing, so it will report " +
         "success on a button that is covered by an overlay or has IsHitTestVisible=false, which a real user " +
-        "could never click. WITH x/y: sends real mouse input at that point, reproducing exactly what a user can " +
-        "do - but it requires the target window to be in the foreground and it takes over the physical cursor, " +
-        "interrupting the human operator. Default to the event mode for routine steps, and switch to x/y when " +
-        "the point of the test IS that a user can physically reach the control, or when the response warns that " +
-        "the element is not reachable. " +
-        "Because this takes over the physical cursor and the keyboard focus, it interrupts whatever the person is doing at that moment. Tell them you are about to drive the mouse BEFORE you call it, and give them a moment to stop typing - an unannounced cursor that moves on its own reads as a malfunction. " +
+        "could never click. WITH x/y: clicks at that exact point, going through real hit-testing like a user " +
+        "would (so it hits whatever is on top). It normally does this by driving the mouse from INSIDE the " +
+        "target process, which moves neither the physical cursor nor the keyboard focus - you can keep working " +
+        "while it clicks. Only if that in-process path cannot be set up does it fall back to real mouse input, " +
+        "which does move the cursor and take focus (the response names which path ran). Default to the event " +
+        "mode for routine steps, and switch to x/y when the point of the test IS that a user can physically " +
+        "reach the control, or when the response warns that the element is not reachable. " +
         "What the event mode does depends on the element, and the response names " +
         "the path it took - check it when a click appears to do nothing. A control with an accessibility " +
         "pattern is invoked or toggled through it, and a ButtonBase-derived control whose peer offers neither " +

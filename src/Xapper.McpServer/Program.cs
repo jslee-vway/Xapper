@@ -56,13 +56,13 @@ var serverInstructions = """
     in its response rather than trusting the word "Clicked". When the element needs genuine input - hit
     testing, mouse capture, a handler on MouseDown rather than MouseLeftButtonDown - pass x/y.
 
-    Two paths use the real mouse: click with x/y, and any drag that does not start on a splitter, slider or
-    scrollbar thumb. Both move the physical cursor and hand focus to the target window, so they interrupt
-    whatever the person is doing. There is no way around it - a control that reads the OS button state cannot
-    be driven by synthetic events, and Windows takes a drop location from the physical cursor and nowhere
-    else. Prefer the paths that do not need the cursor, and when one of these two is the only way, say so to
-    the person and let them get their hands off the keyboard before you call it. Announcing costs one
-    sentence; a cursor that moves on its own with no warning reads as the machine malfunctioning.
+    Click with x/y and any drag that does not start on a splitter, slider or scrollbar thumb are normally
+    driven from inside the target process: real WM mouse messages with the OS button-state and cursor-position
+    reads briefly spoofed, so WPF accepts them as genuine input while the physical cursor never moves and the
+    person's focus is never taken. You can keep working while Xapper clicks and drags. Only when that
+    in-process path cannot be set up does it fall back to real mouse input, which does move the cursor and take
+    focus; the response names which path ran ("synthetic mouse input" vs "real mouse input"). Prefer refs and
+    coordinates freely - the cursor stays the person's in the normal case.
 
     Attach first: xapper_list_processes, then xapper_attach. Attaching again to a process you are already
     attached to is rejected, but the rejection surfaces only after the injection attempt, as a connect

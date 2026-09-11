@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using Xapper.Protocol;
 using Xapper.Protocol.Messages.Requests;
@@ -354,6 +355,23 @@ public sealed class IpcServer
         if (!await waiter.WaitForReady(element))
             return NotReadyError(message.Id, request.Ref, request.Timeout);
 
+        // 좌표 클릭: 먼저 후킹 경로로 실제 커서 없이 시도한다. 좌표 변환과 창 핸들은 UI 스레드에서 구하고,
+        // WM 메시지 전송은 UI 스레드 밖에서(대상 창으로 크로스스레드) 돌린다.
+        if (request.X.HasValue && request.Y.HasValue)
+        {
+            var target = await Application.Current.Dispatcher.InvokeAsync(
+                () => (Hwnd: HwndHandleOf(element), Screen: MouseInput.ToScreenPoint(element, request.X.Value, request.Y.Value)));
+
+            if (SyntheticMouse.TryClick(target.Hwnd, target.Screen))
+            {
+                var hookText = $"Clicked ref={request.Ref} at ({request.X:F2},{request.Y:F2}) " +
+                               "via synthetic mouse input (no cursor movement)";
+                return IpcSerializer.CreateResponse(message.Id,
+                    new ActionResponse { Success = true, Message = await SettleAsync(hookText, request.Timeout) });
+            }
+            // 후킹을 걸 수 없으면 아래의 기존 좌표 클릭(실제 입력)으로 폴백한다.
+        }
+
         var outcome = await Application.Current.Dispatcher.InvokeAsync(
             () => ClickAction.Execute(element, request.X, request.Y));
 
@@ -366,6 +384,17 @@ public sealed class IpcServer
 
         var response = new ActionResponse { Success = true, Message = await SettleAsync(text, request.Timeout) };
         return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
+    /// 요소가 속한 최상위 창(HwndSource)의 핸들을 돌려줍니다. 팝업·메뉴·드롭다운은 각자 HwndSource 라
+    /// 그 자신의 핸들이 나온다. 소스가 없으면 IntPtr.Zero. UI 스레드에서 호출해야 한다.
+    /// </summary>
+    private static IntPtr HwndHandleOf(DependencyObject element)
+    {
+        return PresentationSource.FromDependencyObject(element) is HwndSource source
+            ? source.Handle
+            : IntPtr.Zero;
     }
 
     /// <summary>
@@ -548,26 +577,47 @@ public sealed class IpcServer
                 // 걸려 있을 때(예: Viewbox) 그만큼 어긋난다.
                 var grab = thumb.PointFromScreen(start);
                 ThumbDrag.Perform(thumb, thumb.PointFromScreen(end) - grab, grab);
-                return (Start: start, End: end, Activated: true, UsedThumb: true);
+                return (Start: start, End: end, UsedThumb: true, Hwnd: IntPtr.Zero);
             }
 
-            // 여기부터는 실제 마우스 입력이다. 출발 지점에 썸이 없으면 다른 길이 없다 — 항목을 대상에
-            // 떨어뜨리는 드래그는 Windows 가 물리 커서에서 드롭 위치를 읽으므로 이벤트로는 흉내 낼 수 없다.
-            var anchor = source ?? target;
-            var activated = anchor is null || MouseInput.BringToForeground(anchor);
-
-            return (Start: start, End: end, Activated: activated, UsedThumb: false);
+            // 후킹 드래그를 걸 대상 창. source(없으면 target)의 HwndSource 를 UI 스레드에서 구한다.
+            var hwnd = source is not null ? HwndHandleOf(source)
+                     : target is not null ? HwndHandleOf(target)
+                     : IntPtr.Zero;
+            return (Start: start, End: end, UsedThumb: false, Hwnd: hwnd);
         });
 
-        if (!outcome.UsedThumb)
-            await Actions.DragAction.ExecuteAsync(outcome.Start, outcome.End);
+        string how;
+        string? warning = null;
+        if (outcome.UsedThumb)
+        {
+            how = "its own drag events (no real input)";
+        }
+        else if (SyntheticMouse.TryDrag(outcome.Hwnd, outcome.Start, outcome.End))
+        {
+            // 후킹 경로: 커서를 옮기지 않고 대상 창에 드래그를 보낸다.
+            how = "synthetic mouse input (no cursor movement)";
+        }
+        else
+        {
+            // 후킹을 걸 수 없으면 실제 마우스 입력으로 폴백한다(Step 3에서 알림 2단계로 대체).
+            bool activated;
+            if ((source ?? target) is { } anchor)
+                activated = await Application.Current.Dispatcher.InvokeAsync(() => MouseInput.BringToForeground(anchor));
+            else
+                activated = true;
 
-        var how = outcome.UsedThumb ? "its own drag events (no real input)" : "real mouse input";
+            await Actions.DragAction.ExecuteAsync(outcome.Start, outcome.End);
+            how = "real mouse input";
+            if (!activated)
+                warning = "the target window could not be brought to the foreground. The first input may have " +
+                          "been consumed by window activation, so the drag may not have reached the control. " +
+                          "Bring the window to the front and retry.";
+        }
+
         var text = $"Dragged ({outcome.Start.X:F0},{outcome.Start.Y:F0}) -> ({outcome.End.X:F0},{outcome.End.Y:F0}) via {how}";
-        if (!outcome.Activated)
-            text += " | WARNING: the target window could not be brought to the foreground. The first input may have " +
-                    "been consumed by window activation, so the drag may not have reached the control. " +
-                    "Bring the window to the front and retry.";
+        if (warning is not null)
+            text += " | WARNING: " + warning;
 
         var response = new ActionResponse { Success = true, Message = await SettleAsync(text, request.Timeout) };
         return IpcSerializer.CreateResponse(message.Id, response);

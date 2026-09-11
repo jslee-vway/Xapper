@@ -27,7 +27,9 @@ public sealed class PayloadExtractor
     [
         "Xapper.Inspector.dll",
         "Xapper.Protocol.dll",
-        "Xapper.Inspector.deps.json"
+        "Xapper.Inspector.deps.json",
+        // 대상 프로세스 안에서 user32 를 후킹해 커서 없이 클릭·드래그하기 위한 인라인 후킹 라이브러리.
+        "MinHook.NET.dll"
     ];
 
     private static readonly string[] GenericInjectorFiles =

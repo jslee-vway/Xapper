@@ -28,7 +28,7 @@ Project Structure:
 src/
   Xapper.Protocol/      - Shared IPC message contracts (net9.0, no WPF dependency)
   Xapper.Injector/      - Snoop Injector wrapper (calls InjectorLauncher as subprocess)
-  Xapper.Inspector/     - Injected library (runs inside target WPF app)
+  Xapper.Inspector/     - Injected library (runs inside target WPF app; MinHook.NET for cursor-free input)
   Xapper.McpServer/     - MCP server (stdio transport, ModelContextProtocol 1.2.0)
 tests/
   Xapper.TestApp/       - Sample WPF login form for testing

@@ -37,6 +37,8 @@
                       LogicalName="Xapper.Payload.net6.0-windows.Xapper.Protocol.dll" />
     <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net6.0-windows\Xapper.Inspector.deps.json"
                       LogicalName="Xapper.Payload.net6.0-windows.Xapper.Inspector.deps.json" />
+    <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net6.0-windows\MinHook.NET.dll"
+                      LogicalName="Xapper.Payload.net6.0-windows.MinHook.NET.dll" />
     <!-- Inspector: net7.0-windows -->
     <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net7.0-windows\Xapper.Inspector.dll"
                       LogicalName="Xapper.Payload.net7.0-windows.Xapper.Inspector.dll" />
@@ -44,6 +46,8 @@
                       LogicalName="Xapper.Payload.net7.0-windows.Xapper.Protocol.dll" />
     <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net7.0-windows\Xapper.Inspector.deps.json"
                       LogicalName="Xapper.Payload.net7.0-windows.Xapper.Inspector.deps.json" />
+    <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net7.0-windows\MinHook.NET.dll"
+                      LogicalName="Xapper.Payload.net7.0-windows.MinHook.NET.dll" />
     <!-- Inspector: net8.0-windows -->
     <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net8.0-windows\Xapper.Inspector.dll"
                       LogicalName="Xapper.Payload.net8.0-windows.Xapper.Inspector.dll" />
@@ -51,6 +55,8 @@
                       LogicalName="Xapper.Payload.net8.0-windows.Xapper.Protocol.dll" />
     <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net8.0-windows\Xapper.Inspector.deps.json"
                       LogicalName="Xapper.Payload.net8.0-windows.Xapper.Inspector.deps.json" />
+    <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net8.0-windows\MinHook.NET.dll"
+                      LogicalName="Xapper.Payload.net8.0-windows.MinHook.NET.dll" />
     <!-- Inspector: net9.0-windows -->
     <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net9.0-windows\Xapper.Inspector.dll"
                       LogicalName="Xapper.Payload.net9.0-windows.Xapper.Inspector.dll" />
@@ -58,6 +64,8 @@
                       LogicalName="Xapper.Payload.net9.0-windows.Xapper.Protocol.dll" />
     <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net9.0-windows\Xapper.Inspector.deps.json"
                       LogicalName="Xapper.Payload.net9.0-windows.Xapper.Inspector.deps.json" />
+    <EmbeddedResource Include="..\Xapper.Inspector\bin\$(Configuration)\net9.0-windows\MinHook.NET.dll"
+                      LogicalName="Xapper.Payload.net9.0-windows.MinHook.NET.dll" />
   </ItemGroup>
 
 </Project>
