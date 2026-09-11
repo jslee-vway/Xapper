@@ -56,12 +56,14 @@ public static class ClickAction
     /// <param name="relativeX">요소 내 상대 X 좌표 (0.0~1.0). null이면 기본 클릭.</param>
     /// <param name="relativeY">요소 내 상대 Y 좌표 (0.0~1.0). null이면 기본 클릭.</param>
     /// <param name="doubleClick">true면 좌표 지점을 더블클릭한다(좌표 지정 시에만 유효).</param>
+    /// <param name="modifiers">좌표 클릭에 함께 누를 수식키. 실제 키로 누르고 finally 로 뗀다. 이벤트 클릭에는 의미가 없다.</param>
     /// <returns>수행된 클릭 경로와, 주의가 필요하면 경고 문구.</returns>
-    public static ClickOutcome Execute(UIElement element, double? relativeX = null, double? relativeY = null, bool doubleClick = false)
+    public static ClickOutcome Execute(UIElement element, double? relativeX = null, double? relativeY = null,
+        bool doubleClick = false, ModifierKeys modifiers = ModifierKeys.None)
     {
         // 좌표가 지정된 경우: SendInput(ABSOLUTE)으로 원자적 마우스 클릭
         if (relativeX.HasValue && relativeY.HasValue)
-            return ClickAtPosition(element, relativeX.Value, relativeY.Value, doubleClick);
+            return ClickAtPosition(element, relativeX.Value, relativeY.Value, doubleClick, modifiers);
 
         var path = RaiseClick(element);
 
@@ -126,15 +128,28 @@ public static class ClickAction
 
     /// <summary>
     /// 요소 내 상대 좌표를 스크린 좌표로 변환하고, 대상 윈도우를 포그라운드로 올린 뒤 클릭합니다.
+    /// 수식키는 실제 키 입력으로 먼저 누르고 finally 로 뗀다 — 실제 Ctrl↓·클릭·Ctrl↑ 이 전경 창 큐에 순서대로
+    /// 들어가 UI 스레드가 펌프하므로 클릭 처리 시점에 수식키가 반영된다.
     /// </summary>
-    private static ClickOutcome ClickAtPosition(UIElement element, double relativeX, double relativeY, bool doubleClick)
+    private static ClickOutcome ClickAtPosition(UIElement element, double relativeX, double relativeY,
+        bool doubleClick, ModifierKeys modifiers)
     {
         var screenPoint = MouseInput.ToScreenPoint(element, relativeX, relativeY);
         var activated = MouseInput.BringToForeground(element);
-        if (doubleClick)
-            MouseInput.DoubleClickAt(screenPoint);
-        else
-            MouseInput.ClickAt(screenPoint);
+
+        RealModifierKeys.Press(modifiers);
+        try
+        {
+            if (doubleClick)
+                MouseInput.DoubleClickAt(screenPoint);
+            else
+                MouseInput.ClickAt(screenPoint);
+        }
+        finally
+        {
+            RealModifierKeys.Release(modifiers);
+        }
+
         return new ClickOutcome(RealMouseInputPath, activated ? null : NotForegroundWarning);
     }
 

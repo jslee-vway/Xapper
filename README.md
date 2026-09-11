@@ -97,7 +97,7 @@ src/
 ├── Xapper.Protocol        IPC 메시지 계약 (net6.0~9.0-windows, WPF 무의존)
 ├── Xapper.Injector        네이티브 인젝터 (P/Invoke로 DLL 주입)
 ├── Xapper.Inspector       인젝션 라이브러리 (net6.0~9.0-windows 멀티타겟)
-└── Xapper.McpServer       MCP 서버 (stdio transport, 19개 도구)
+└── Xapper.McpServer       MCP 서버 (stdio transport, 21개 도구)
 tests/
 ├── Xapper.TestApp         샘플 WPF 로그인 폼
 └── Xapper.Tests           단위 테스트 (xUnit)
@@ -140,9 +140,12 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 ### **4. UI 자동 조작**
 - `xapper_click` : 버튼/요소 클릭. 좌표를 주지 않으면 AutomationPeer → RaiseEvent 폴백(빠르지만 히트테스트를 건너뛰므로 가려진 요소도 눌림), 좌표를 주면 그 지점을 실제 히트테스트를 거쳐 클릭한다. 기본은 대상 프로세스 안에서 몰아(user32 후킹 + WM 메시지) 실제 커서·포커스를 건드리지 않으므로 작업 중에도 쓸 수 있고, 그 경로를 설치할 수 없을 때만 실제 마우스 입력으로 폴백한다. 어느 경로였는지(synthetic / real mouse input)가 응답에 표시되며, 접근성 경로는 큐가 비워질 때까지 기다렸다가 반환한다
   - 후킹 경로가 안 될 때의 폴백만 SendInput으로 위치 기반 클릭 (듀얼 모니터/DPI 대응) — 이 경우에만 물리 커서를 옮기고 대상 창에 포커스를 넘긴다
+  - 클릭/더블클릭/드래그/우클릭/휠 모두 `modifiers` 로 Ctrl/Shift/Alt 를 걸 수 있다(후킹 경로에서는 스푸프, 실제입력 폴백에서는 실제 키를 눌렀다 뗀다)
 - `xapper_doubleclick` : 좌표 지점 더블클릭. 더블클릭은 특정 위치에서 일어나는 제스처라 x/y 필수(그리드 행/셀을 더블클릭해 편집기 열기 등). 클릭과 같은 후킹 경로(커서 미이동)를 쓰고, 두 번의 누름을 시스템 더블클릭 시간 안에 붙여 보내 한 번의 더블클릭으로 인식시킨다 — xapper_click 을 두 번 부르는 것으로는 보장되지 않는다
+- `xapper_rightclick` : 좌표 지점 우클릭(컨텍스트 메뉴). 항상 좌표 제스처, 기본은 요소 중앙. 후킹 경로(커서 미이동)이고 폴백만 실제 입력
+- `xapper_wheel` : 좌표 지점에서 마우스 휠. `xapper_scroll` 이 ScrollViewer 오프셋을 직접 바꾸는 것과 달리 실제 휠 제스처라 Ctrl+휠 줌·커스텀 MouseWheel 핸들러를 건드린다. `notches` 양수=위, 음수=아래(±100)
 - `xapper_type` : TextBox에 텍스트 입력
-- `xapper_key` : 대상 프로세스 안에서 키 입력(F2/Enter/Escape/Tab/화살표/한 글자). 전경 창과 무관하게 대상 앱의 키보드 포커스 요소로 라우팅하므로, 사용자가 앞 창에서 딴 일을 해도 키가 새지 않는다. ref 를 주면 먼저 그 요소에 포커스. 수식키(Ctrl/Shift/Alt)는 현재 미지원(WPF 가 OS 키보드 상태를 읽어 합성 불가). 편집기가 키(F2)로만 열리는 컨트롤에 쓴다
+- `xapper_key` : 대상 프로세스 안에서 키 입력(F2/Enter/Escape/Tab/화살표/한 글자). 전경 창과 무관하게 대상 앱의 키보드 포커스 요소로 라우팅하므로, 사용자가 앞 창에서 딴 일을 해도 키가 새지 않는다. ref 를 주면 먼저 그 요소에 포커스. 수식키(`modifiers`: Ctrl/Shift/Alt, `Ctrl+Shift` 조합)를 지원 — 대상 프로세스 안에서 GetKeyState 를 스푸프해 WPF 가 눌린 것으로 보게 하며(Ctrl+Z 등), 후크를 걸 수 없으면 오류로 안내한다. 편집기가 키(F2)로만 열리는 컨트롤에 쓴다
 - `xapper_select` : ComboBox/ListBox 항목 선택
 - `xapper_toggle` : CheckBox/ToggleButton 토글
 - `xapper_expand` : TreeViewItem/Expander 펼치기/접기
@@ -270,15 +273,17 @@ AI 에이전트가 자동으로 수행하는 흐름:
 | `xapper_snapshot` | UI 트리 스냅샷 | `maxDepth` |
 | `xapper_find` | 요소 검색 | `name`, `automationId`, `type`, `text` |
 | `xapper_element_at` | 좌표의 요소 조회 | `x`, `y`, `maxAncestors` (선택) |
-| `xapper_click` | 클릭 | `ref`, `x`, `y` (모두 선택) |
-| `xapper_doubleclick` | 더블클릭 | `ref`, `x`, `y` (x/y 필수) |
+| `xapper_click` | 클릭 | `ref`, `x`, `y` (모두 선택), `modifiers`(선택) |
+| `xapper_doubleclick` | 더블클릭 | `ref`, `x`, `y` (x/y 필수), `modifiers`(선택) |
+| `xapper_rightclick` | 우클릭 | `ref`, `x`, `y`, `modifiers` (x/y/modifiers 선택) |
+| `xapper_wheel` | 마우스 휠 | `ref`, `notches`, `x`, `y`, `modifiers` (x/y/modifiers 선택) |
 | `xapper_type` | 텍스트 입력 | `ref`, `text` |
-| `xapper_key` | 키 입력 | `key`, `modifiers`(미지원), `ref`(선택) |
+| `xapper_key` | 키 입력 | `key`, `modifiers`(선택), `ref`(선택) |
 | `xapper_select` | 항목 선택 | `ref`, `item` |
 | `xapper_toggle` | 토글 | `ref` |
 | `xapper_expand` | 펼치기/접기 | `ref`, `expand` |
 | `xapper_scroll` | 스크롤 | `ref`, `direction`, `amount` |
-| `xapper_drag` | 드래그 | `sourceRef`, `targetRef`, `offsetX`/`offsetY`, 화면 좌표 (모두 선택) |
+| `xapper_drag` | 드래그 | `sourceRef`, `targetRef`, `offsetX`/`offsetY`, 화면 좌표 (모두 선택), `modifiers`(선택) |
 | `xapper_get_property` | 속성 읽기 | `ref`, `propertyName` |
 | `xapper_get_bindings` | 바인딩 조회 | `ref` |
 | `xapper_screenshot` | 스크린샷 (이미지 반환) | `ref`, `maxWidth`, `savePath`, `mode` (모두 선택) |

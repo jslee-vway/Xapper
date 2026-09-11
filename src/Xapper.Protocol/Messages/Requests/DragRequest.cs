@@ -33,4 +33,7 @@ public sealed class DragRequest
 
     /// <summary>요소가 준비될 때까지 대기하는 최대 시간 (밀리초). 기본값 5000ms.</summary>
     public int Timeout { get; set; } = 5000;
+
+    /// <summary>함께 누를 수식키("Ctrl", "Shift", "Alt", 조합 "Ctrl+Shift"). null 이면 없음.</summary>
+    public string? Modifiers { get; set; }
 }

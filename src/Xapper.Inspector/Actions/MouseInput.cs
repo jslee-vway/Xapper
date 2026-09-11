@@ -53,6 +53,12 @@ internal static class MouseInput
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
     private const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
     private const uint MOUSEEVENTF_MOVE = 0x0001;
+    private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+    private const uint MOUSEEVENTF_WHEEL = 0x0800;
+
+    /// <summary>휠 한 눈금의 delta(Win32 WHEEL_DELTA).</summary>
+    private const int WheelDelta = 120;
 
     private const int SM_XVIRTUALSCREEN = 76;
     private const int SM_YVIRTUALSCREEN = 77;
@@ -176,6 +182,38 @@ internal static class MouseInput
             CreateInput(x, y, flags | MOUSEEVENTF_LEFTUP)
         };
 
+        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+    }
+
+    /// <summary>지정된 스크린 좌표에서 오른쪽 버튼을 누르고 뗍니다(이동·누름·뗌을 한 번의 SendInput 으로).</summary>
+    /// <param name="screenPoint">우클릭할 스크린 좌표.</param>
+    public static void RightClickAt(Point screenPoint)
+    {
+        var (x, y) = ToVirtualDesktop(screenPoint);
+        var flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+
+        var inputs = new[]
+        {
+            CreateInput(x, y, flags | MOUSEEVENTF_MOVE),
+            CreateInput(x, y, flags | MOUSEEVENTF_RIGHTDOWN),
+            CreateInput(x, y, flags | MOUSEEVENTF_RIGHTUP)
+        };
+
+        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+    }
+
+    /// <summary>지정된 스크린 좌표로 이동한 뒤 휠을 굴립니다. 양수는 위(앞), 음수는 아래(뒤).</summary>
+    /// <param name="screenPoint">휠을 굴릴 스크린 좌표.</param>
+    /// <param name="notches">굴릴 눈금 수(부호가 방향).</param>
+    public static void WheelAt(Point screenPoint, int notches)
+    {
+        var (x, y) = ToVirtualDesktop(screenPoint);
+        var flags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+
+        var wheel = CreateInput(x, y, flags | MOUSEEVENTF_WHEEL);
+        wheel.mi.mouseData = unchecked((uint)(notches * WheelDelta));
+
+        var inputs = new[] { CreateInput(x, y, flags | MOUSEEVENTF_MOVE), wheel };
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
     }
 

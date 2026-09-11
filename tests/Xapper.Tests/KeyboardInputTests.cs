@@ -18,7 +18,7 @@ public class KeyboardInputTests
     {
         WithFocusedTextBox(box =>
         {
-            var (error, focused) = KeyboardInput.Send(null, "a", null);
+            var (error, focused, _) = KeyboardInput.Send(null, "a", ModifierKeys.None);
 
             Assert.Null(error);
             Assert.Equal("a", box.Text);
@@ -34,7 +34,7 @@ public class KeyboardInputTests
             var seen = new List<Key>();
             box.KeyDown += (_, e) => seen.Add(e.Key);
 
-            var (error, _) = KeyboardInput.Send(null, "Escape", null);
+            var (error, _, _) = KeyboardInput.Send(null, "Escape", ModifierKeys.None);
 
             Assert.Null(error);
             Assert.Contains(Key.Escape, seen);
@@ -47,7 +47,7 @@ public class KeyboardInputTests
         WithFocusedTextBox((box, other) =>
         {
             // box 가 포커스인 상태에서 other 를 ref 로 주면, 키가 나가기 전에 other 로 포커스가 옮겨져야 한다.
-            var (error, focused) = KeyboardInput.Send(other, "b", null);
+            var (error, focused, _) = KeyboardInput.Send(other, "b", ModifierKeys.None);
 
             Assert.Null(error);
             Assert.Equal("b", other.Text);
@@ -62,7 +62,7 @@ public class KeyboardInputTests
     {
         WithFocusedTextBox(_ =>
         {
-            var (error, _) = KeyboardInput.Send(null, "NotAKey", null);
+            var (error, _, _) = KeyboardInput.Send(null, "NotAKey", ModifierKeys.None);
 
             Assert.NotNull(error);
             Assert.Contains("Unknown key", error);
@@ -76,22 +76,10 @@ public class KeyboardInputTests
         {
             // "999" 는 Enum.TryParse<Key> 를 (Key)999 로 통과시키지만 정의되지 않은 값이라,
             // KeyEventArgs 생성자가 예외를 던진다(결함 2). 던지지 말고 오류로 돌려줘야 한다.
-            var (error, _) = KeyboardInput.Send(null, "999", null);
+            var (error, _, _) = KeyboardInput.Send(null, "999", ModifierKeys.None);
 
             Assert.NotNull(error);
             Assert.Contains("Unknown key", error);
-        });
-    }
-
-    [Fact]
-    public void Send_WithModifiers_ReturnsErrorWithoutThrowing()
-    {
-        WithFocusedTextBox(_ =>
-        {
-            var (error, _) = KeyboardInput.Send(null, "a", "Ctrl");
-
-            Assert.NotNull(error);
-            Assert.Contains("not supported", error);
         });
     }
 
@@ -102,7 +90,7 @@ public class KeyboardInputTests
         {
             // 창도 포커스도 없이 호출한다.
             Keyboard.ClearFocus();
-            var (error, _) = KeyboardInput.Send(null, "a", null);
+            var (error, _, _) = KeyboardInput.Send(null, "a", ModifierKeys.None);
 
             Assert.NotNull(error);
             Assert.Contains("no ref", error);

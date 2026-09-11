@@ -19,4 +19,7 @@ public sealed class ClickRequest
 
     /// <summary>true면 같은 지점을 연속 두 번 눌러 더블클릭한다. 좌표(X/Y)가 있어야 한다.</summary>
     public bool DoubleClick { get; set; }
+
+    /// <summary>함께 누를 수식키("Ctrl", "Shift", "Alt", 조합 "Ctrl+Shift"). null 이면 없음.</summary>
+    public string? Modifiers { get; set; }
 }

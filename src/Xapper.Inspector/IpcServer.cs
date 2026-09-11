@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using Xapper.Protocol;
@@ -239,6 +240,8 @@ public sealed class IpcServer
                 "ping" => await HandlePing(message),
                 "snapshot" => await HandleSnapshot(message),
                 "click" => await HandleClick(message),
+                "wheel" => await HandleWheel(message),
+                "rightclick" => await HandleRightClick(message),
                 "type" => await HandleType(message),
                 "key" => await HandleKey(message),
                 "select" => await HandleSelect(message),
@@ -349,12 +352,17 @@ public sealed class IpcServer
     {
         var request = IpcSerializer.DeserializePayload<ClickRequest>(message.Payload!.Value);
 
+        if (!ModifierParser.TryParse(request.Modifiers, out var modifiers, out var modifierError))
+            return IpcSerializer.CreateError(message.Id, modifierError);
+
         if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
             return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
             return NotReadyError(message.Id, request.Ref, request.Timeout);
+
+        var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
 
         // 좌표 클릭: 먼저 후킹 경로로 실제 커서 없이 시도한다. 좌표 변환과 창 핸들은 UI 스레드에서 구하고,
         // WM 메시지 전송은 UI 스레드 밖에서(대상 창으로 크로스스레드) 돌린다.
@@ -364,12 +372,12 @@ public sealed class IpcServer
                 () => (Hwnd: HwndHandleOf(element), Screen: MouseInput.ToScreenPoint(element, request.X.Value, request.Y.Value)));
 
             var hooked = request.DoubleClick
-                ? SyntheticMouse.TryDoubleClick(target.Hwnd, target.Screen)
-                : SyntheticMouse.TryClick(target.Hwnd, target.Screen);
+                ? SyntheticMouse.TryDoubleClick(target.Hwnd, target.Screen, modifiers)
+                : SyntheticMouse.TryClick(target.Hwnd, target.Screen, modifiers);
             if (hooked)
             {
                 var hookVerb = request.DoubleClick ? "Double-clicked" : "Clicked";
-                var hookText = $"{hookVerb} ref={request.Ref} at ({request.X:F2},{request.Y:F2}) " +
+                var hookText = $"{hookVerb}{withMods} ref={request.Ref} at ({request.X:F2},{request.Y:F2}) " +
                                "via synthetic mouse input (no cursor movement)";
                 return IpcSerializer.CreateResponse(message.Id,
                     new ActionResponse { Success = true, Message = await SettleAsync(hookText, request.Timeout) });
@@ -378,18 +386,138 @@ public sealed class IpcServer
         }
 
         var outcome = await Application.Current.Dispatcher.InvokeAsync(
-            () => ClickAction.Execute(element, request.X, request.Y, request.DoubleClick));
+            () => ClickAction.Execute(element, request.X, request.Y, request.DoubleClick, modifiers));
 
         var posInfo = request.X.HasValue && request.Y.HasValue
             ? $" at ({request.X:F2},{request.Y:F2})"
             : "";
         var verb = request.DoubleClick ? "Double-clicked" : "Clicked";
-        var text = $"{verb} ref={request.Ref}{posInfo} via {outcome.Path}";
+        var text = $"{verb}{withMods} ref={request.Ref}{posInfo} via {outcome.Path}";
         if (outcome.Warning is not null)
             text += $" | {outcome.Warning}";
 
         var response = new ActionResponse { Success = true, Message = await SettleAsync(text, request.Timeout) };
         return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
+    /// 요소 위 한 지점을 우클릭합니다. 항상 좌표 제스처이며(접근성에 우클릭 패턴이 없다), 먼저 후킹 경로로
+    /// 커서 없이 시도하고 안 되면 실제 마우스 입력으로 폴백한다. 실제 입력일 때의 수식키는 실제 키로 누르고
+    /// finally 로 뗀다.
+    /// </summary>
+    private async Task<IpcMessage> HandleRightClick(IpcMessage message)
+    {
+        var request = IpcSerializer.DeserializePayload<RightClickRequest>(message.Payload!.Value);
+
+        if (!ModifierParser.TryParse(request.Modifiers, out var modifiers, out var modifierError))
+            return IpcSerializer.CreateError(message.Id, modifierError);
+
+        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+            return error;
+
+        var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
+        if (!await waiter.WaitForReady(element))
+            return NotReadyError(message.Id, request.Ref, request.Timeout);
+
+        var rx = request.X ?? 0.5;
+        var ry = request.Y ?? 0.5;
+        var target = await Application.Current.Dispatcher.InvokeAsync(
+            () => (Hwnd: HwndHandleOf(element), Screen: MouseInput.ToScreenPoint(element, rx, ry)));
+
+        var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
+        string how;
+        string? warning = null;
+        if (SyntheticMouse.TryRightClick(target.Hwnd, target.Screen, modifiers))
+        {
+            how = "synthetic mouse input (no cursor movement)";
+        }
+        else
+        {
+            var activated = await Application.Current.Dispatcher.InvokeAsync(() => MouseInput.BringToForeground(element));
+            RealModifierKeys.Press(modifiers);
+            try
+            {
+                MouseInput.RightClickAt(target.Screen);
+            }
+            finally
+            {
+                RealModifierKeys.Release(modifiers);
+            }
+            how = "real mouse input";
+            if (!activated)
+                warning = "the target window could not be brought to the foreground, so the click may not have reached the control. Bring the window to the front and retry.";
+        }
+
+        var text = $"Right-clicked{withMods} ref={request.Ref} at ({rx:F2},{ry:F2}) via {how}";
+        if (warning is not null)
+            text += " | WARNING: " + warning;
+
+        return IpcSerializer.CreateResponse(message.Id,
+            new ActionResponse { Success = true, Message = await SettleAsync(text, request.Timeout) });
+    }
+
+    /// <summary>
+    /// 요소 위 한 지점에서 휠을 굴립니다. 먼저 후킹 경로로 커서 없이 시도하고 안 되면 실제 입력으로 폴백한다.
+    /// scroll 과 달리 실제 휠 제스처라 Ctrl+휠 줌·커스텀 MouseWheel 핸들러를 건드린다.
+    /// </summary>
+    private async Task<IpcMessage> HandleWheel(IpcMessage message)
+    {
+        var request = IpcSerializer.DeserializePayload<WheelRequest>(message.Payload!.Value);
+
+        if (request.Notches == 0)
+            return IpcSerializer.CreateError(message.Id,
+                "notches must be non-zero: positive rolls up (away from you), negative rolls down.");
+
+        if (request.Notches is < -100 or > 100)
+            return IpcSerializer.CreateError(message.Id,
+                "notches must be between -100 and 100. Roll in several calls for a longer scroll.");
+
+        if (!ModifierParser.TryParse(request.Modifiers, out var modifiers, out var modifierError))
+            return IpcSerializer.CreateError(message.Id, modifierError);
+
+        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+            return error;
+
+        var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
+        if (!await waiter.WaitForReady(element))
+            return NotReadyError(message.Id, request.Ref, request.Timeout);
+
+        var rx = request.X ?? 0.5;
+        var ry = request.Y ?? 0.5;
+        var target = await Application.Current.Dispatcher.InvokeAsync(
+            () => (Hwnd: HwndHandleOf(element), Screen: MouseInput.ToScreenPoint(element, rx, ry)));
+
+        var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
+        string how;
+        string? warning = null;
+        if (SyntheticMouse.TryWheel(target.Hwnd, target.Screen, request.Notches, modifiers))
+        {
+            how = "synthetic mouse input (no cursor movement)";
+        }
+        else
+        {
+            var activated = await Application.Current.Dispatcher.InvokeAsync(() => MouseInput.BringToForeground(element));
+            RealModifierKeys.Press(modifiers);
+            try
+            {
+                MouseInput.WheelAt(target.Screen, request.Notches);
+            }
+            finally
+            {
+                RealModifierKeys.Release(modifiers);
+            }
+            how = "real mouse input";
+            if (!activated)
+                warning = "the target window could not be brought to the foreground, so the wheel may not have reached the control. Bring the window to the front and retry.";
+        }
+
+        var direction = request.Notches > 0 ? "up" : "down";
+        var text = $"Wheeled {Math.Abs(request.Notches)} notch(es) {direction}{withMods} on ref={request.Ref} at ({rx:F2},{ry:F2}) via {how}";
+        if (warning is not null)
+            text += " | WARNING: " + warning;
+
+        return IpcSerializer.CreateResponse(message.Id,
+            new ActionResponse { Success = true, Message = await SettleAsync(text, request.Timeout) });
     }
 
     /// <summary>
@@ -437,6 +565,9 @@ public sealed class IpcServer
     {
         var request = IpcSerializer.DeserializePayload<KeyRequest>(message.Payload!.Value);
 
+        if (!ModifierParser.TryParse(request.Modifiers, out var modifiers, out var modifierError))
+            return IpcSerializer.CreateError(message.Id, modifierError);
+
         DependencyObject? refElement = null;
         if (request.Ref is { } elementRef)
         {
@@ -448,12 +579,15 @@ public sealed class IpcServer
                 return NotReadyError(message.Id, elementRef, request.Timeout);
         }
 
-        var (keyError, focused) = await Application.Current.Dispatcher.InvokeAsync(
-            () => KeyboardInput.Send(refElement, request.Key, request.Modifiers));
+        var (keyError, focused, modifierPath) = await Application.Current.Dispatcher.InvokeAsync(
+            () => KeyboardInput.Send(refElement, request.Key, modifiers));
         if (keyError is not null)
             return IpcSerializer.CreateError(message.Id, keyError);
 
-        var text = $"{request.Key} sent -> {focused} now focused";
+        var keyText = string.IsNullOrWhiteSpace(request.Modifiers) ? request.Key : $"{request.Modifiers.Trim()}+{request.Key}";
+        var text = $"{keyText} sent -> {focused} now focused";
+        if (modifierPath.Length > 0)
+            text += $" ({modifierPath})";
         return IpcSerializer.CreateResponse(message.Id,
             new ActionResponse { Success = true, Message = await SettleAsync(text, request.Timeout) });
     }
@@ -598,6 +732,9 @@ public sealed class IpcServer
             return IpcSerializer.CreateError(message.Id,
                 "Drag requires targetRef, offsetX/offsetY, or both targetX and targetY as screen coordinates.");
 
+        if (!ModifierParser.TryParse(request.Modifiers, out var modifiers, out var modifierError))
+            return IpcSerializer.CreateError(message.Id, modifierError);
+
         var outcome = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
             var start = ResolveStartPoint(source, request);
@@ -621,13 +758,17 @@ public sealed class IpcServer
             return (Start: start, End: end, UsedThumb: false, Hwnd: hwnd);
         });
 
+        var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
+
         string how;
         string? warning = null;
         if (outcome.UsedThumb)
         {
             how = "its own drag events (no real input)";
+            if (modifiers != ModifierKeys.None)
+                warning = "modifiers do not apply to a thumb drag (the control's own drag events were used) and were ignored.";
         }
-        else if (SyntheticMouse.TryDrag(outcome.Hwnd, outcome.Start, outcome.End))
+        else if (SyntheticMouse.TryDrag(outcome.Hwnd, outcome.Start, outcome.End, modifiers))
         {
             // 후킹 경로: 커서를 옮기지 않고 대상 창에 드래그를 보낸다.
             how = "synthetic mouse input (no cursor movement)";
@@ -641,7 +782,15 @@ public sealed class IpcServer
             else
                 activated = true;
 
-            await Actions.DragAction.ExecuteAsync(outcome.Start, outcome.End);
+            RealModifierKeys.Press(modifiers);
+            try
+            {
+                await Actions.DragAction.ExecuteAsync(outcome.Start, outcome.End);
+            }
+            finally
+            {
+                RealModifierKeys.Release(modifiers);
+            }
             how = "real mouse input";
             if (!activated)
                 warning = "the target window could not be brought to the foreground. The first input may have " +
@@ -649,7 +798,7 @@ public sealed class IpcServer
                           "Bring the window to the front and retry.";
         }
 
-        var text = $"Dragged ({outcome.Start.X:F0},{outcome.Start.Y:F0}) -> ({outcome.End.X:F0},{outcome.End.Y:F0}) via {how}";
+        var text = $"Dragged{withMods} ({outcome.Start.X:F0},{outcome.Start.Y:F0}) -> ({outcome.End.X:F0},{outcome.End.Y:F0}) via {how}";
         if (warning is not null)
             text += " | WARNING: " + warning;
 

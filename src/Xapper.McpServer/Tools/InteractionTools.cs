@@ -67,7 +67,7 @@ public sealed class InteractionTools
         return FormatResponse(response);
     }
 
-    [McpServerTool(Name = "xapper_drag"), Description("Drag with the left mouse button held down. Three modes: element to element (sourceRef + targetRef), element by pixel offset (sourceRef + offsetX/offsetY), or absolute screen points (sourceX/sourceY + targetX/targetY). Two very different things can happen and the response says which did. If the start point lands on a splitter, slider or scrollbar thumb, that control's own drag events are raised: the movement is given as a number, so it is more precise than a real drag and it touches neither the cursor nor focus. Note that the start point decides this, not the element you name - starting on a list item does not become a scrollbar drag just because the list has a scrollbar. For a slider or a scrollbar prefer xapper_scroll or setting the value outright; drag is for splitters and for the cases below. Everything else - dropping an item on a target, moving a shape on a canvas - is normally driven from INSIDE the target process, which moves neither the physical cursor nor the keyboard focus, so you can keep working while it drags. Only if that in-process path cannot be set up does it fall back to real mouse input, which moves the cursor and takes focus; the response names which path ran. The real-input fallback needs the target window in front, and the response carries a WARNING when it could not be brought there, which means the drag may not have reached the control.")]
+    [McpServerTool(Name = "xapper_drag"), Description("Drag with the left mouse button held down. Three modes: element to element (sourceRef + targetRef), element by pixel offset (sourceRef + offsetX/offsetY), or absolute screen points (sourceX/sourceY + targetX/targetY). Two very different things can happen and the response says which did. If the start point lands on a splitter, slider or scrollbar thumb, that control's own drag events are raised: the movement is given as a number, so it is more precise than a real drag and it touches neither the cursor nor focus. Note that the start point decides this, not the element you name - starting on a list item does not become a scrollbar drag just because the list has a scrollbar. For a slider or a scrollbar prefer xapper_scroll or setting the value outright; drag is for splitters and for the cases below. Everything else - dropping an item on a target, moving a shape on a canvas - is normally driven from INSIDE the target process, which moves neither the physical cursor nor the keyboard focus, so you can keep working while it drags. Only if that in-process path cannot be set up does it fall back to real mouse input, which moves the cursor and takes focus; the response names which path ran. The real-input fallback needs the target window in front, and the response carries a WARNING when it could not be brought there, which means the drag may not have reached the control. Pass modifiers for a Ctrl-drag (copy) or Shift-drag.")]
     public async Task<string> Drag(
         [Description("Source element ref from last snapshot. Omit to treat sourceX/sourceY as absolute screen pixels")] int? sourceRef = null,
         [Description("Start X: relative 0.0-1.0 within the source element (default 0.5), or absolute screen X when sourceRef is omitted")] double? sourceX = null,
@@ -77,12 +77,13 @@ public sealed class InteractionTools
         [Description("End Y: relative 0.0-1.0 within the target element (default 0.5), or absolute screen Y when targetRef and offsets are omitted")] double? targetY = null,
         [Description("Horizontal pixels to drag from the start point. Used when targetRef is omitted")] double? offsetX = null,
         [Description("Vertical pixels to drag from the start point. Used when targetRef is omitted")] double? offsetY = null,
+        [Description("Modifier keys to hold during the drag: exactly \"Ctrl\", \"Shift\" or \"Alt\", or e.g. \"Ctrl+Shift\". Case-insensitive. Omit for none. Ignored for splitter/scrollbar thumb drags")] string? modifiers = null,
         [Description("Timeout in ms (default 5000)")] int timeout = 5000,
         CancellationToken ct = default)
     {
         var client = _sessionManager.GetActive();
         var response = await client.DragAsync(
-            sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, timeout, ct);
+            sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, modifiers, timeout, ct);
 
         return FormatResponse(response);
     }

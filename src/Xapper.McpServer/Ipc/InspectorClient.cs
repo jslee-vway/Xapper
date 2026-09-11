@@ -116,10 +116,11 @@ public sealed class InspectorClient : IAsyncDisposable
         return await SendAsync(request, ct);
     }
 
-    /// <summary>UI 요소를 클릭합니다.</summary>
-    public async Task<IpcMessage> ClickAsync(int @ref, int timeout = 5000, double? x = null, double? y = null, bool doubleClick = false, CancellationToken ct = default)
+    /// <summary>UI 요소를 클릭합니다. 좌표 클릭에는 수식키를 함께 걸 수 있다.</summary>
+    public async Task<IpcMessage> ClickAsync(int @ref, int timeout = 5000, double? x = null, double? y = null,
+        bool doubleClick = false, string? modifiers = null, CancellationToken ct = default)
     {
-        var payload = new { @ref, timeout, x, y, doubleClick };
+        var payload = new { @ref, timeout, x, y, doubleClick, modifiers };
         var request = IpcSerializer.CreateRequest("click", payload);
         return await SendAsync(request, ct);
     }
@@ -137,6 +138,24 @@ public sealed class InspectorClient : IAsyncDisposable
     {
         var payload = new { key, modifiers, @ref, timeout };
         var request = IpcSerializer.CreateRequest("key", payload);
+        return await SendAsync(request, ct);
+    }
+
+    /// <summary>요소 위 한 지점에서 휠을 굴립니다. 대상 프로세스 안에서 수행해 커서를 옮기지 않습니다.</summary>
+    public async Task<IpcMessage> WheelAsync(int @ref, int notches, double? x = null, double? y = null,
+        string? modifiers = null, int timeout = 5000, CancellationToken ct = default)
+    {
+        var payload = new { @ref, notches, x, y, modifiers, timeout };
+        var request = IpcSerializer.CreateRequest("wheel", payload);
+        return await SendAsync(request, ct);
+    }
+
+    /// <summary>요소 위 한 지점을 우클릭합니다. 대상 프로세스 안에서 수행해 커서를 옮기지 않습니다.</summary>
+    public async Task<IpcMessage> RightClickAsync(int @ref, double? x = null, double? y = null,
+        string? modifiers = null, int timeout = 5000, CancellationToken ct = default)
+    {
+        var payload = new { @ref, x, y, modifiers, timeout };
+        var request = IpcSerializer.CreateRequest("rightclick", payload);
         return await SendAsync(request, ct);
     }
 
@@ -172,7 +191,7 @@ public sealed class InspectorClient : IAsyncDisposable
         return await SendAsync(request, ct);
     }
 
-    /// <summary>마우스 버튼을 누른 채 두 지점 사이를 드래그합니다.</summary>
+    /// <summary>마우스 버튼을 누른 채 두 지점 사이를 드래그합니다. 수식키를 함께 걸 수 있다(Ctrl+드래그 등).</summary>
     public async Task<IpcMessage> DragAsync(
         int? sourceRef = null,
         double? sourceX = null,
@@ -182,10 +201,11 @@ public sealed class InspectorClient : IAsyncDisposable
         double? targetY = null,
         double? offsetX = null,
         double? offsetY = null,
+        string? modifiers = null,
         int timeout = 5000,
         CancellationToken ct = default)
     {
-        var payload = new { sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, timeout };
+        var payload = new { sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, modifiers, timeout };
         var request = IpcSerializer.CreateRequest("drag", payload);
         return await SendAsync(request, ct);
     }

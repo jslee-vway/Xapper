@@ -1,30 +1,32 @@
 using System.Runtime.InteropServices;
 using System.Windows;
-using MinHook;
+using System.Windows.Input;
 
 namespace Xapper.Inspector.Actions;
 
 /// <summary>
-/// 실제 커서를 옮기지 않고 대상 창에 마우스 입력을 전달하는 정적 클래스.
-///
-/// WPF 는 클릭이 진짜인지 판단할 때 OS 에 직접 묻는다(<c>MouseDevice.GetButtonStateFromSystem</c> →
-/// <c>GetKeyState</c>, 입력 위치 → <c>GetCursorPos</c>/<c>GetMessagePos</c>). 그래서 대상 프로세스 안에서
-/// 그 네 함수를 짧게 후킹해 "버튼이 눌렸고 커서가 이 지점에 있다"고 답하게 하고, 창에 WM 마우스 메시지를
-/// 보낸다. 커서는 한 픽셀도 움직이지 않고, 다른 프로세스의 포커스도 뺏지 않는다(폐기 프로브로 두
-/// 프로세스에서 확인). 후크는 프로세스 수명 동안 한 번만 설치하고 <see cref="_spoof"/> 플래그로만 켠다 —
-/// 꺼져 있으면 트램폴린(원함수)을 그대로 부르므로 대상 앱에 투명하다.
-///
-/// 후크를 설치할 수 없으면(라이브러리 실패) 이 경로는 쓸 수 없으므로 호출자가 실제 입력으로 폴백한다.
+/// 실제 커서를 옮기지 않고 대상 창에 마우스 제스처(클릭·더블클릭·우클릭·휠·드래그)를 전달하는 정적 클래스.
+/// 입력 상태(<c>GetKeyState</c>/<c>GetCursorPos</c> 등)는 <see cref="InputSpoof"/> 가 스푸프하고, 여기서는
+/// 그 스푸프를 켠 채 창에 WM 마우스 메시지를 보낸다. 커서는 한 픽셀도 움직이지 않고, 다른 프로세스의
+/// 포커스도 뺏지 않는다. 후크를 설치할 수 없으면 false 를 돌려 호출자가 실제 입력으로 폴백한다.
 /// </summary>
 internal static class SyntheticMouse
 {
     #region Fields
 
-    private const int VK_LBUTTON = 0x01;
     private const uint WM_MOUSEMOVE = 0x0200;
     private const uint WM_LBUTTONDOWN = 0x0201;
     private const uint WM_LBUTTONUP = 0x0202;
     private const int MK_LBUTTON = 0x0001;
+    private const uint WM_RBUTTONDOWN = 0x0204;
+    private const uint WM_RBUTTONUP = 0x0205;
+    private const uint WM_MOUSEWHEEL = 0x020A;
+    private const int MK_RBUTTON = 0x0002;
+    private const int MK_SHIFT = 0x0004;
+    private const int MK_CONTROL = 0x0008;
+
+    /// <summary>휠 한 눈금의 delta(Win32 WHEEL_DELTA).</summary>
+    private const int WheelDelta = 120;
 
     /// <summary>WM 메시지 사이 간격 (밀리초). 대상 앱이 눌림을 처리한 뒤 떼기를 받도록 여유를 준다.</summary>
     private const int StepDelayMs = 16;
@@ -32,110 +34,82 @@ internal static class SyntheticMouse
     /// <summary>드래그를 나누어 보낼 이동 횟수.</summary>
     private const int DragSteps = 8;
 
-    /// <summary>WM 메시지 하나가 대상 UI 스레드에서 처리되기를 기다리는 한도 (밀리초). 멎은 창에 무한정 매달리지 않는다.</summary>
+    /// <summary>WM 메시지 하나가 대상 UI 스레드에서 처리되기를 기다리는 한도 (밀리초).</summary>
     private const uint SendTimeoutMs = 3000;
 
     private static readonly object Gate = new();
-
-    // 후크는 대상 앱의 여러 스레드에서 불리고, 이 값들은 IPC 스레드가 Gate 안에서 쓴다. 교차 스레드에서
-    // 최신 값을 읽도록 volatile 로 둔다(그래도 스푸프가 켜진 짧은 동안 대상 전체에 영향을 주는 것은 설계상 감수).
-    private static volatile bool _spoof;
-    private static volatile int _sx;
-    private static volatile int _sy;
-    private static volatile bool _lDown;
-
-    private static bool _installAttempted;
-    private static bool _installed;
-
-    // 후크가 설치되어 있는 동안 트램폴린(원함수)을 붙들고 있어야 스푸프가 아닐 때 원래 동작을 부를 수 있다.
-    // EnableHooks 는 이 넷이 모두 대입된 뒤에만 후크를 켜므로, 켜진 뒤 디투어가 부를 때는 항상 null 이 아니다.
-    private static GetKeyStateDelegate? _getKeyStateOrig;
-    private static GetAsyncKeyStateDelegate? _getAsyncKeyStateOrig;
-    private static GetCursorPosDelegate? _getCursorPosOrig;
-    private static GetMessagePosDelegate? _getMessagePosOrig;
-
-    // 디투어 델리게이트와 후킹 엔진은 반드시 정적 필드로 붙들어 둔다. MinHook 은 이 델리게이트의 함수
-    // 포인터를 user32 에 심는데, 관리 측에 강한 참조가 없으면 GC 가 델리게이트를 수거하고, 이후 대상 앱이
-    // 후킹된 함수를 부르는 순간 "수거된 델리게이트로 콜백" 으로 CLR 이 FailFast 하며 대상 앱을 죽인다.
-    // 후킹은 프로세스 전역·무한 수명이므로 GC.KeepAlive 로는 부족하고, 프로세스가 사는 동안 계속 참조해야 한다.
-    private static HookEngine? _engine;
-    private static GetKeyStateDelegate? _getKeyStateDetour;
-    private static GetAsyncKeyStateDelegate? _getAsyncKeyStateDetour;
-    private static GetCursorPosDelegate? _getCursorPosDetour;
-    private static GetMessagePosDelegate? _getMessagePosDetour;
 
     #endregion
 
     #region Public Methods
 
-    /// <summary>
-    /// 지정된 창의 한 지점을 커서 이동 없이 클릭합니다.
-    /// </summary>
+    /// <summary>지정된 창의 한 지점을 커서 이동 없이 클릭합니다.</summary>
     /// <param name="hwnd">대상 요소가 속한 최상위 창(HwndSource) 핸들.</param>
     /// <param name="screen">클릭할 스크린 디바이스 좌표.</param>
+    /// <param name="modifiers">함께 눌린 것으로 볼 수식키.</param>
     /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
-    public static bool TryClick(IntPtr hwnd, Point screen)
+    public static bool TryClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
     {
-        if (hwnd == IntPtr.Zero || !EnsureInstalled())
+        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
             return false;
 
         lock (Gate)
         {
             var client = ToClient(hwnd, screen);
-            Begin(screen);
+            var mk = MkFlags(modifiers);
+            InputSpoof.BeginMouse(screen, modifiers);
             try
             {
-                Send(hwnd, WM_MOUSEMOVE, IntPtr.Zero, client);
+                Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, client);
                 Sleep();
-                _lDown = true;
-                Send(hwnd, WM_LBUTTONDOWN, (IntPtr)MK_LBUTTON, client);
+                InputSpoof.SetLeftDown(true);
+                Send(hwnd, WM_LBUTTONDOWN, (IntPtr)(mk | MK_LBUTTON), client);
                 Sleep();
-                _lDown = false;
-                Send(hwnd, WM_LBUTTONUP, IntPtr.Zero, client);
+                InputSpoof.SetLeftDown(false);
+                Send(hwnd, WM_LBUTTONUP, (IntPtr)mk, client);
                 Sleep();
             }
             finally
             {
-                End();
+                InputSpoof.EndMouse();
             }
         }
 
         return true;
     }
 
-    /// <summary>
-    /// 지정된 창의 한 지점을 커서 이동 없이 더블클릭합니다. 누름-뗌을 짧은 간격으로 두 번 보내,
-    /// WPF 가 두 클릭 사이 간격을 보고 ClickCount=2 로 인식하게 합니다.
-    /// </summary>
+    /// <summary>지정된 창의 한 지점을 커서 이동 없이 더블클릭합니다(누름-뗌 두 번, WPF 가 ClickCount=2 로 인식).</summary>
     /// <param name="hwnd">대상 요소가 속한 최상위 창(HwndSource) 핸들.</param>
     /// <param name="screen">더블클릭할 스크린 디바이스 좌표.</param>
+    /// <param name="modifiers">함께 눌린 것으로 볼 수식키.</param>
     /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
-    public static bool TryDoubleClick(IntPtr hwnd, Point screen)
+    public static bool TryDoubleClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
     {
-        if (hwnd == IntPtr.Zero || !EnsureInstalled())
+        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
             return false;
 
         lock (Gate)
         {
             var client = ToClient(hwnd, screen);
-            Begin(screen);
+            var mk = MkFlags(modifiers);
+            InputSpoof.BeginMouse(screen, modifiers);
             try
             {
-                Send(hwnd, WM_MOUSEMOVE, IntPtr.Zero, client);
+                Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, client);
                 Sleep();
                 for (var i = 0; i < 2; i++)
                 {
-                    _lDown = true;
-                    Send(hwnd, WM_LBUTTONDOWN, (IntPtr)MK_LBUTTON, client);
+                    InputSpoof.SetLeftDown(true);
+                    Send(hwnd, WM_LBUTTONDOWN, (IntPtr)(mk | MK_LBUTTON), client);
                     Sleep();
-                    _lDown = false;
-                    Send(hwnd, WM_LBUTTONUP, IntPtr.Zero, client);
+                    InputSpoof.SetLeftDown(false);
+                    Send(hwnd, WM_LBUTTONUP, (IntPtr)mk, client);
                     Sleep();
                 }
             }
             finally
             {
-                End();
+                InputSpoof.EndMouse();
             }
         }
 
@@ -143,26 +117,97 @@ internal static class SyntheticMouse
     }
 
     /// <summary>
-    /// 지정된 창에서 한 지점을 누른 채 다른 지점까지 끌고 뗍니다. 커서는 움직이지 않습니다.
+    /// 지정된 창의 한 지점을 커서 이동 없이 우클릭합니다. WPF 는 오른쪽 버튼 뗌에서 ContextMenu 를 연다.
+    /// 접근성에 우클릭 패턴은 없으므로 항상 이 좌표 제스처로 수행한다.
     /// </summary>
     /// <param name="hwnd">대상 요소가 속한 최상위 창(HwndSource) 핸들.</param>
-    /// <param name="start">드래그 시작 스크린 디바이스 좌표.</param>
-    /// <param name="end">드래그 끝 스크린 디바이스 좌표.</param>
-    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
-    public static bool TryDrag(IntPtr hwnd, Point start, Point end)
+    /// <param name="screen">우클릭할 스크린 디바이스 좌표.</param>
+    /// <param name="modifiers">함께 눌린 것으로 볼 수식키.</param>
+    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없으면 false.</returns>
+    public static bool TryRightClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
     {
-        if (hwnd == IntPtr.Zero || !EnsureInstalled())
+        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
             return false;
 
         lock (Gate)
         {
-            Begin(start);
+            var client = ToClient(hwnd, screen);
+            var mk = MkFlags(modifiers);
+            InputSpoof.BeginMouse(screen, modifiers);
             try
             {
-                Send(hwnd, WM_MOUSEMOVE, IntPtr.Zero, ToClient(hwnd, start));
+                Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, client);
                 Sleep();
-                _lDown = true;
-                Send(hwnd, WM_LBUTTONDOWN, (IntPtr)MK_LBUTTON, ToClient(hwnd, start));
+                InputSpoof.SetRightDown(true);
+                Send(hwnd, WM_RBUTTONDOWN, (IntPtr)(mk | MK_RBUTTON), client);
+                Sleep();
+                InputSpoof.SetRightDown(false);
+                Send(hwnd, WM_RBUTTONUP, (IntPtr)mk, client);
+                Sleep();
+            }
+            finally
+            {
+                InputSpoof.EndMouse();
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 지정된 창의 한 지점에서 커서 이동 없이 휠을 굴립니다. WPF 는 스푸프된 커서 위치 아래 요소로 MouseWheel 을 라우팅한다.
+    /// </summary>
+    /// <param name="hwnd">대상 요소가 속한 최상위 창(HwndSource) 핸들.</param>
+    /// <param name="screen">휠을 굴릴 스크린 디바이스 좌표.</param>
+    /// <param name="notches">굴릴 눈금 수. 양수는 위(앞), 음수는 아래(뒤).</param>
+    /// <param name="modifiers">함께 눌린 것으로 볼 수식키(Ctrl+휠 줌 등).</param>
+    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없으면 false.</returns>
+    public static bool TryWheel(IntPtr hwnd, Point screen, int notches, ModifierKeys modifiers = ModifierKeys.None)
+    {
+        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
+            return false;
+
+        lock (Gate)
+        {
+            InputSpoof.BeginMouse(screen, modifiers);
+            try
+            {
+                Send(hwnd, WM_MOUSEMOVE, (IntPtr)MkFlags(modifiers), ToClient(hwnd, screen));
+                Sleep();
+                var (wParam, lParam) = PackWheel(notches, modifiers, screen);
+                Send(hwnd, WM_MOUSEWHEEL, wParam, lParam);
+                Sleep();
+            }
+            finally
+            {
+                InputSpoof.EndMouse();
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>지정된 창에서 한 지점을 누른 채 다른 지점까지 끌고 뗍니다. 커서는 움직이지 않습니다.</summary>
+    /// <param name="hwnd">대상 요소가 속한 최상위 창(HwndSource) 핸들.</param>
+    /// <param name="start">드래그 시작 스크린 디바이스 좌표.</param>
+    /// <param name="end">드래그 끝 스크린 디바이스 좌표.</param>
+    /// <param name="modifiers">함께 눌린 것으로 볼 수식키(Ctrl+드래그 복사 등).</param>
+    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
+    public static bool TryDrag(IntPtr hwnd, Point start, Point end, ModifierKeys modifiers = ModifierKeys.None)
+    {
+        if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
+            return false;
+
+        lock (Gate)
+        {
+            var mk = MkFlags(modifiers);
+            InputSpoof.BeginMouse(start, modifiers);
+            try
+            {
+                Send(hwnd, WM_MOUSEMOVE, (IntPtr)mk, ToClient(hwnd, start));
+                Sleep();
+                InputSpoof.SetLeftDown(true);
+                Send(hwnd, WM_LBUTTONDOWN, (IntPtr)(mk | MK_LBUTTON), ToClient(hwnd, start));
                 Sleep();
 
                 for (var step = 1; step <= DragSteps; step++)
@@ -171,19 +216,18 @@ internal static class SyntheticMouse
                     var point = new Point(
                         start.X + (end.X - start.X) * progress,
                         start.Y + (end.Y - start.Y) * progress);
-                    _sx = (int)Math.Round(point.X);
-                    _sy = (int)Math.Round(point.Y);
-                    Send(hwnd, WM_MOUSEMOVE, (IntPtr)MK_LBUTTON, ToClient(hwnd, point));
+                    InputSpoof.SetPosition(point);
+                    Send(hwnd, WM_MOUSEMOVE, (IntPtr)(mk | MK_LBUTTON), ToClient(hwnd, point));
                     Sleep();
                 }
 
-                _lDown = false;
-                Send(hwnd, WM_LBUTTONUP, IntPtr.Zero, ToClient(hwnd, end));
+                InputSpoof.SetLeftDown(false);
+                Send(hwnd, WM_LBUTTONUP, (IntPtr)mk, ToClient(hwnd, end));
                 Sleep();
             }
             finally
             {
-                End();
+                InputSpoof.EndMouse();
             }
         }
 
@@ -191,132 +235,55 @@ internal static class SyntheticMouse
     }
 
     /// <summary>
-    /// 후크를 설치합니다(테스트 전용 진입점). 델리게이트가 GC 후에도 살아 있는지 검증하기 위해,
-    /// 클릭 없이 설치만 트리거할 수 있게 노출한다.
+    /// WM_MOUSEWHEEL 의 wParam(상위 워드 delta, 하위 워드 MK 플래그)과 lParam(스크린 좌표 — 버튼 메시지와 달리
+    /// 클라이언트 좌표가 아니다)을 만듭니다. 테스트에서 검증하기 위해 internal 로 둔다.
     /// </summary>
-    /// <returns>후크가 설치되어 있으면 true.</returns>
-    internal static bool EnsureInstalledForTests() => EnsureInstalled();
+    /// <param name="notches">굴릴 눈금 수. 양수는 위(앞), 음수는 아래(뒤).</param>
+    /// <param name="modifiers">함께 눌린 것으로 볼 수식키.</param>
+    /// <param name="screen">휠을 굴릴 스크린 디바이스 좌표.</param>
+    internal static (IntPtr WParam, IntPtr LParam) PackWheel(int notches, ModifierKeys modifiers, Point screen)
+    {
+        var delta = unchecked((short)(notches * WheelDelta));
+        var packed = ((uint)(ushort)delta << 16) | (uint)MkFlags(modifiers);
+        // 32비트 프로세스에서 IntPtr(long) 은 checked 라 음수 delta(0xFF88…)에서 넘친다. int 로 잘라 넣는다.
+        var wParam = (IntPtr)unchecked((int)packed);
+        var lParam = PackPoint((int)Math.Round(screen.X), (int)Math.Round(screen.Y));
+        return (wParam, lParam);
+    }
 
     #endregion
 
     #region Private Methods
 
-    /// <summary>스푸프를 켜고 커서 위치를 지정합니다. 반드시 <see cref="End"/>와 짝지어 호출한다.</summary>
-    private static void Begin(Point screen)
-    {
-        _sx = (int)Math.Round(screen.X);
-        _sy = (int)Math.Round(screen.Y);
-        _lDown = false;
-        _spoof = true;
-    }
-
-    /// <summary>스푸프를 끕니다. 이후 후크는 다시 원함수 값을 돌려준다.</summary>
-    private static void End()
-    {
-        _spoof = false;
-        _lDown = false;
-    }
-
     private static void Sleep() => Thread.Sleep(StepDelayMs);
+
+    /// <summary>수식키를 WM 마우스 메시지의 wParam MK 플래그로 바꿉니다(Alt 는 MK 플래그가 없다).</summary>
+    private static int MkFlags(ModifierKeys modifiers)
+    {
+        var flags = 0;
+        if (modifiers.HasFlag(ModifierKeys.Control)) flags |= MK_CONTROL;
+        if (modifiers.HasFlag(ModifierKeys.Shift)) flags |= MK_SHIFT;
+        return flags;
+    }
 
     /// <summary>스크린 좌표를 대상 창의 클라이언트 좌표로 바꿔 lParam 으로 만듭니다.</summary>
     private static IntPtr ToClient(IntPtr hwnd, Point screen)
     {
         var point = new POINT { X = (int)Math.Round(screen.X), Y = (int)Math.Round(screen.Y) };
         ScreenToClient(hwnd, ref point);
-        return (IntPtr)(((point.Y & 0xFFFF) << 16) | (point.X & 0xFFFF));
+        return PackPoint(point.X, point.Y);
+    }
+
+    /// <summary>x 를 하위 워드, y 를 상위 워드에 담은 lParam 을 만듭니다(음수 좌표도 16비트로 잘라 담는다).</summary>
+    private static IntPtr PackPoint(int x, int y)
+    {
+        return (IntPtr)(((y & 0xFFFF) << 16) | (x & 0xFFFF));
     }
 
     private static void Send(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
     {
         // 타임아웃이 있는 동기 전송. 대상 UI 스레드가 멎으면(ABORTIFHUNG) 무한정 기다리지 않고 넘어간다.
         SendMessageTimeoutW(hwnd, message, wParam, lParam, SMTO_ABORTIFHUNG, SendTimeoutMs, out _);
-    }
-
-    /// <summary>
-    /// 후크를 처음 한 번 설치합니다. 설치에 실패하면 다시 시도하지 않고 계속 false 를 돌려준다 —
-    /// 실패한 후킹을 매번 재시도하면 대상 앱을 흔들 뿐이다.
-    /// </summary>
-    private static bool EnsureInstalled()
-    {
-        lock (Gate)
-        {
-            if (_installAttempted)
-                return _installed;
-
-            _installAttempted = true;
-            try
-            {
-                // 디투어 델리게이트를 먼저 정적 필드에 붙들고, 그 필드에 담긴 델리게이트로만 후킹한다.
-                // (인라인으로 new 해서 넘기면 임시 객체가 GC 되어 대상 앱이 크래시한다.)
-                _engine = new HookEngine();
-                _getKeyStateDetour = GetKeyStateHook;
-                _getAsyncKeyStateDetour = GetAsyncKeyStateHook;
-                _getCursorPosDetour = GetCursorPosHook;
-                _getMessagePosDetour = GetMessagePosHook;
-
-                _getKeyStateOrig = _engine.CreateHook("user32.dll", "GetKeyState", _getKeyStateDetour);
-                _getAsyncKeyStateOrig = _engine.CreateHook("user32.dll", "GetAsyncKeyState", _getAsyncKeyStateDetour);
-                _getCursorPosOrig = _engine.CreateHook("user32.dll", "GetCursorPos", _getCursorPosDetour);
-                _getMessagePosOrig = _engine.CreateHook("user32.dll", "GetMessagePos", _getMessagePosDetour);
-                _engine.EnableHooks();
-                _installed = true;
-            }
-            catch
-            {
-                // 후킹을 못 걸면 이 경로는 포기하고 호출자가 실제 입력으로 폴백한다.
-                _installed = false;
-            }
-
-            return _installed;
-        }
-    }
-
-    #endregion
-
-    #region Hooks
-
-    private static short GetKeyStateHook(int nVirtKey)
-    {
-        if (_spoof && nVirtKey == VK_LBUTTON)
-            return _lDown ? unchecked((short)0x8000) : (short)0;
-
-        var orig = _getKeyStateOrig;
-        return orig is not null ? orig(nVirtKey) : (short)0;
-    }
-
-    private static short GetAsyncKeyStateHook(int vKey)
-    {
-        if (_spoof && vKey == VK_LBUTTON)
-            return _lDown ? unchecked((short)0x8000) : (short)0;
-
-        var orig = _getAsyncKeyStateOrig;
-        return orig is not null ? orig(vKey) : (short)0;
-    }
-
-    private static bool GetCursorPosHook(out POINT point)
-    {
-        if (_spoof)
-        {
-            point = new POINT { X = _sx, Y = _sy };
-            return true;
-        }
-
-        var orig = _getCursorPosOrig;
-        if (orig is not null)
-            return orig(out point);
-
-        point = default;
-        return false;
-    }
-
-    private static uint GetMessagePosHook()
-    {
-        if (_spoof)
-            return (uint)(((_sy & 0xFFFF) << 16) | (_sx & 0xFFFF));
-
-        var orig = _getMessagePosOrig;
-        return orig is not null ? orig() : 0u;
     }
 
     #endregion
@@ -329,18 +296,6 @@ internal static class SyntheticMouse
         public int X;
         public int Y;
     }
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate short GetKeyStateDelegate(int nVirtKey);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate short GetAsyncKeyStateDelegate(int vKey);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate bool GetCursorPosDelegate(out POINT point);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate uint GetMessagePosDelegate();
 
     private const uint SMTO_ABORTIFHUNG = 0x0002;
 
