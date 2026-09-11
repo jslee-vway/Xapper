@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Windows;
@@ -135,19 +136,84 @@ public sealed class IpcServer
     }
 
     /// <summary>
-    /// 참조 번호를 요소로 해석합니다. 사라진 번호에는 왜 사라졌고 무엇을 해야 하는지 알려주는 오류를 냅니다.
+    /// 참조 번호를 해석하고, 사라졌으면 무엇을 해야 하는지 알려주는 오류 응답을 <paramref name="error"/> 에 담습니다.
+    /// 예외를 던지지 않는다: 주입된 프로세스 안에서 던지면 대상 앱의 first-chance 핸들러가 그 예외로
+    /// 앱을 죽일 수 있다(결함 2). 오래된 ref 는 흔한 정상 경로이므로 호출자가 오류 응답으로 처리한다.
     /// </summary>
     /// <param name="elementRef">해석할 참조 번호.</param>
-    /// <returns>해당 요소.</returns>
-    /// <exception cref="InvalidOperationException">번호가 더 이상 유효하지 않은 경우.</exception>
-    private DependencyObject ResolveRef(int elementRef)
+    /// <param name="messageId">응답에 실을 메시지 ID.</param>
+    /// <param name="element">해석된 요소 (성공 시).</param>
+    /// <param name="error">해석 실패 시 돌려줄 오류 응답.</param>
+    /// <returns>해석에 성공하면 true.</returns>
+    private bool TryResolveRef(
+        int elementRef, string messageId,
+        [NotNullWhen(true)] out DependencyObject? element,
+        [NotNullWhen(false)] out IpcMessage? error)
     {
-        return _refRegistry.Resolve(elementRef)
-            ?? throw new InvalidOperationException(
-                $"Element ref={elementRef} cannot be resolved. Either xapper_snapshot ran after you obtained it " +
-                "- that discards every earlier ref - or the element has since left the visual tree, which " +
-                "happens to virtualized rows and closed dialogs. Take a fresh snapshot and use a ref from it. " +
-                "xapper_find does not discard refs.");
+        element = _refRegistry.Resolve(elementRef);
+        if (element is null)
+        {
+            error = StaleRefError(messageId, elementRef);
+            return false;
+        }
+
+        error = null;
+        return true;
+    }
+
+    /// <summary>
+    /// 참조 번호를 <see cref="UIElement"/> 로 해석합니다. 액션 실행기는 UIElement 를 요구하므로,
+    /// 오래된 번호와 "UIElement 가 아님"을 한곳에서 걸러 오류 응답으로 돌려준다(예외를 던지지 않는다).
+    /// </summary>
+    /// <param name="elementRef">해석할 참조 번호.</param>
+    /// <param name="messageId">응답에 실을 메시지 ID.</param>
+    /// <param name="element">해석된 UIElement (성공 시).</param>
+    /// <param name="error">해석 실패 시 돌려줄 오류 응답.</param>
+    /// <returns>UIElement 로 해석되면 true.</returns>
+    private bool TryResolveUiElement(
+        int elementRef, string messageId,
+        [NotNullWhen(true)] out UIElement? element,
+        [NotNullWhen(false)] out IpcMessage? error)
+    {
+        element = null;
+
+        if (!TryResolveRef(elementRef, messageId, out var resolved, out error))
+            return false;
+
+        element = resolved as UIElement;
+        if (element is null)
+        {
+            error = IpcSerializer.CreateError(messageId,
+                $"Element ref={elementRef} ({resolved.GetType().Name}) is not a UIElement, so this action " +
+                "cannot be performed on it. Pick an interactive element from a snapshot.");
+            return false;
+        }
+
+        error = null;
+        return true;
+    }
+
+    /// <summary>
+    /// 오래된 참조 번호에 대한, 왜 사라졌고 무엇을 해야 하는지 알려주는 오류 응답을 만듭니다.
+    /// </summary>
+    private static IpcMessage StaleRefError(string messageId, int elementRef)
+    {
+        return IpcSerializer.CreateError(messageId,
+            $"Element ref={elementRef} cannot be resolved. Either xapper_snapshot ran after you obtained it " +
+            "- that discards every earlier ref - or the element has since left the visual tree, which " +
+            "happens to virtualized rows and closed dialogs. Take a fresh snapshot and use a ref from it. " +
+            "xapper_find does not discard refs.");
+    }
+
+    /// <summary>
+    /// 제한 시간 안에 요소가 상호작용 가능한 상태가 되지 않았을 때의 오류 응답을 만듭니다.
+    /// </summary>
+    private static IpcMessage NotReadyError(string messageId, int elementRef, int timeoutMs)
+    {
+        return IpcSerializer.CreateError(messageId,
+            $"Element ref={elementRef} did not become visible, enabled and loaded within {timeoutMs} ms. " +
+            "It may be disabled until a form validates, hidden behind another view, or still loading. " +
+            "Re-read the state, or raise the timeout.");
     }
 
     /// <summary>
@@ -221,12 +287,17 @@ public sealed class IpcServer
 
         var skipped = new List<string>();
 
+        // rootRef 는 레지스트리를 비우기 전에 해석해야 한다. 순서가 뒤바뀌면 방금 돌려받은 번호까지
+        // 사라져 rootRef 를 쓸 수 없다. 여기서(Clear 이전에) 미리 해석해 오래된 번호를 걸러낸다.
+        DependencyObject? root = null;
+        if (request.RootRef.HasValue)
+        {
+            if (!TryResolveRef(request.RootRef.Value, message.Id, out root, out var rootError))
+                return rootError;
+        }
+
         var snapshot = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
-            // 참조는 레지스트리를 비우기 전에 해석해야 한다.
-            // 순서가 뒤바뀌면 방금 돌려받은 번호까지 반드시 사라져 rootRef를 쓸 수 없다.
-            var root = request.RootRef.HasValue ? ResolveRef(request.RootRef.Value) : null;
-
             _refRegistry.Clear();
 
             if (root is not null)
@@ -235,8 +306,7 @@ public sealed class IpcServer
             // 열려 있는 최상위 창을 모두 순회한다. 다이얼로그뿐 아니라 팝업·메뉴·드롭다운도 여기에 포함된다.
             var roots = VisualRoots.Sources();
             if (roots.Count == 0)
-                throw new InvalidOperationException(
-                    "No window of this application is open. It may be starting up or closing.");
+                return null;
 
             // 창이 하나면 그대로 반환
             if (roots.Count == 1)
@@ -257,6 +327,10 @@ public sealed class IpcServer
             return virtualRoot;
         });
 
+        if (snapshot is null)
+            return IpcSerializer.CreateError(message.Id,
+                "No window of this application is open. It may be starting up or closing.");
+
         var response = new SnapshotResponse
         {
             Generation = _refRegistry.Generation,
@@ -273,10 +347,12 @@ public sealed class IpcServer
     {
         var request = IpcSerializer.DeserializePayload<ClickRequest>(message.Payload!.Value);
 
-        var element = ResolveRef(request.Ref);
+        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+            return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
-        await waiter.WaitForReady(element);
+        if (!await waiter.WaitForReady(element))
+            return NotReadyError(message.Id, request.Ref, request.Timeout);
 
         var outcome = await Application.Current.Dispatcher.InvokeAsync(
             () => ClickAction.Execute(element, request.X, request.Y));
@@ -299,15 +375,17 @@ public sealed class IpcServer
     {
         var request = IpcSerializer.DeserializePayload<TypeTextRequest>(message.Payload!.Value);
 
-        var element = ResolveRef(request.Ref);
+        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+            return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
-        await waiter.WaitForReady(element);
+        if (!await waiter.WaitForReady(element))
+            return NotReadyError(message.Id, request.Ref, request.Timeout);
 
-        await Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            TypeAction.Execute(element, request.Text, request.Clear);
-        });
+        var result = await Application.Current.Dispatcher.InvokeAsync(
+            () => TypeAction.Execute(element, request.Text, request.Clear));
+        if (result.Error is { } reason)
+            return IpcSerializer.CreateError(message.Id, reason);
 
         var response = new ActionResponse
         {
@@ -323,15 +401,17 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleSelect(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<SelectRequest>(message.Payload!.Value);
-        var element = ResolveRef(request.Ref);
+        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+            return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
-        await waiter.WaitForReady(element);
+        if (!await waiter.WaitForReady(element))
+            return NotReadyError(message.Id, request.Ref, request.Timeout);
 
-        await Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            SelectAction.Execute(element, request.ItemText, request.ItemIndex);
-        });
+        var result = await Application.Current.Dispatcher.InvokeAsync(
+            () => SelectAction.Execute(element, request.ItemText, request.ItemIndex));
+        if (result.Error is { } reason)
+            return IpcSerializer.CreateError(message.Id, reason);
 
         var response = new ActionResponse
         {
@@ -347,15 +427,16 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleToggle(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<ToggleRequest>(message.Payload!.Value);
-        var element = ResolveRef(request.Ref);
+        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+            return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
-        await waiter.WaitForReady(element);
+        if (!await waiter.WaitForReady(element))
+            return NotReadyError(message.Id, request.Ref, request.Timeout);
 
-        await Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            ToggleAction.Execute(element);
-        });
+        var result = await Application.Current.Dispatcher.InvokeAsync(() => ToggleAction.Execute(element));
+        if (result.Error is { } reason)
+            return IpcSerializer.CreateError(message.Id, reason);
 
         var response = new ActionResponse
         {
@@ -371,15 +452,17 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleExpand(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<ExpandRequest>(message.Payload!.Value);
-        var element = ResolveRef(request.Ref);
+        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+            return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
-        await waiter.WaitForReady(element);
+        if (!await waiter.WaitForReady(element))
+            return NotReadyError(message.Id, request.Ref, request.Timeout);
 
-        await Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            ExpandAction.Execute(element, request.Expand);
-        });
+        var result = await Application.Current.Dispatcher.InvokeAsync(
+            () => ExpandAction.Execute(element, request.Expand));
+        if (result.Error is { } reason)
+            return IpcSerializer.CreateError(message.Id, reason);
 
         var action = request.Expand ? "Expanded" : "Collapsed";
         var response = new ActionResponse
@@ -396,15 +479,17 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleScroll(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<ScrollRequest>(message.Payload!.Value);
-        var element = ResolveRef(request.Ref);
+        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+            return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
-        await waiter.WaitForReady(element);
+        if (!await waiter.WaitForReady(element))
+            return NotReadyError(message.Id, request.Ref, request.Timeout);
 
-        await Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            ScrollAction.Execute(element, request.HorizontalPercent, request.VerticalPercent);
-        });
+        var result = await Application.Current.Dispatcher.InvokeAsync(
+            () => ScrollAction.Execute(element, request.HorizontalPercent, request.VerticalPercent));
+        if (result.Error is { } reason)
+            return IpcSerializer.CreateError(message.Id, reason);
 
         var response = new ActionResponse
         {
@@ -426,14 +511,29 @@ public sealed class IpcServer
             throw new InvalidOperationException("drag request requires a payload.");
 
         var request = IpcSerializer.DeserializePayload<DragRequest>(message.Payload.Value);
-        var source = ResolveDragElement(request.SourceRef);
-        var target = ResolveDragElement(request.TargetRef);
+
+        if (!TryResolveDragElement(request.SourceRef, message.Id, out var source, out var dragError))
+            return dragError;
+        if (!TryResolveDragElement(request.TargetRef, message.Id, out var target, out dragError))
+            return dragError;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
-        if (source is not null)
-            await waiter.WaitForReady(source);
-        if (target is not null)
-            await waiter.WaitForReady(target);
+        // source/target 이 null 이 아니라는 것은 해당 ref 가 지정됐다는 뜻이다(GetValueOrDefault 는 그 실제 값).
+        if (source is not null && !await waiter.WaitForReady(source))
+            return NotReadyError(message.Id, request.SourceRef.GetValueOrDefault(), request.Timeout);
+        if (target is not null && !await waiter.WaitForReady(target))
+            return NotReadyError(message.Id, request.TargetRef.GetValueOrDefault(), request.Timeout);
+
+        // 좌표가 덜 지정된 드래그는 예외 대신 여기서 오류로 돌려준다(결함 2): 좌표 계산은 UI 스레드 안에서
+        // 일어나므로 그 안에서 던지면 대상 앱을 죽일 수 있다. 아래 검사는 ResolveStartPoint/ResolveEndPoint 의
+        // 조건과 같으며, 그 둘의 throw 를 여기서 앞질러 도달 불가로 만든다.
+        if (source is null && (!request.SourceX.HasValue || !request.SourceY.HasValue))
+            return IpcSerializer.CreateError(message.Id,
+                "Drag requires sourceRef, or both sourceX and sourceY as screen coordinates.");
+        if (target is null && !request.OffsetX.HasValue && !request.OffsetY.HasValue
+            && (!request.TargetX.HasValue || !request.TargetY.HasValue))
+            return IpcSerializer.CreateError(message.Id,
+                "Drag requires targetRef, offsetX/offsetY, or both targetX and targetY as screen coordinates.");
 
         var outcome = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -474,17 +574,38 @@ public sealed class IpcServer
     }
 
     /// <summary>
-    /// 드래그용 참조 번호를 UIElement로 해석합니다. 번호가 지정되지 않았으면 null을 반환합니다.
+    /// 드래그용 참조 번호를 UIElement로 해석합니다. 번호가 없으면 element 는 null 이고 성공으로 취급한다
+    /// (출발/도착을 화면 좌표로 지정하는 경우). 오래된 번호나 UIElement 가 아닌 요소는 예외 대신
+    /// <paramref name="error"/> 로 알린다(결함 2).
     /// </summary>
-    private UIElement? ResolveDragElement(int? elementRef)
+    /// <param name="elementRef">해석할 참조 번호. null 이면 좌표 기반.</param>
+    /// <param name="messageId">응답에 실을 메시지 ID.</param>
+    /// <param name="element">해석된 요소, 또는 번호가 없으면 null.</param>
+    /// <param name="error">해석 실패 시 돌려줄 오류 응답.</param>
+    /// <returns>번호가 없거나 UIElement 로 해석되면 true.</returns>
+    private bool TryResolveDragElement(
+        int? elementRef, string messageId,
+        out UIElement? element,
+        [NotNullWhen(false)] out IpcMessage? error)
     {
+        element = null;
+        error = null;
+
         if (!elementRef.HasValue)
-            return null;
+            return true;
 
-        var element = ResolveRef(elementRef.Value);
+        if (!TryResolveRef(elementRef.Value, messageId, out var resolved, out error))
+            return false;
 
-        return element as UIElement
-            ?? throw new InvalidOperationException($"Element ref={elementRef} ({element.GetType().Name}) is not a UIElement.");
+        element = resolved as UIElement;
+        if (element is null)
+        {
+            error = IpcSerializer.CreateError(messageId,
+                $"Element ref={elementRef} is not a UIElement, so it cannot be a drag source or target.");
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -526,15 +647,15 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleGetProperty(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<GetPropertyRequest>(message.Payload!.Value);
-        var element = ResolveRef(request.Ref);
+        if (!TryResolveRef(request.Ref, message.Id, out var element, out var error))
+            return error;
 
-        var response = await Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            var result = PropertyReader.ReadProperty(element, request.PropertyName);
-            result.Ref = request.Ref;
-            return result;
-        });
+        var result = await Application.Current.Dispatcher.InvokeAsync(
+            () => PropertyReader.ReadProperty(element, request.PropertyName));
+        if (result.Response is not { } response)
+            return IpcSerializer.CreateError(message.Id, result.Error ?? "property read failed");
 
+        response.Ref = request.Ref;
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
@@ -544,7 +665,8 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleGetBindings(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<GetBindingsRequest>(message.Payload!.Value);
-        var element = ResolveRef(request.Ref);
+        if (!TryResolveRef(request.Ref, message.Id, out var element, out var error))
+            return error;
 
         var response = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -565,27 +687,32 @@ public sealed class IpcServer
             ? IpcSerializer.DeserializePayload<ScreenshotRequest>(message.Payload.Value)
             : new ScreenshotRequest();
 
-        var response = await Application.Current.Dispatcher.InvokeAsync(() =>
+        // ref 는 렌더가 필요한 요소여야 한다. ref 없음(전체 창)과 오래된 ref 를 구분해 걸러낸다.
+        UIElement? target = null;
+        if (request.Ref.HasValue)
         {
-            var element = request.Ref.HasValue
-                ? ResolveRef(request.Ref.Value) as UIElement
-                    ?? throw new InvalidOperationException(
-                        $"Element ref={request.Ref} cannot be captured because it is not a UIElement. " +
-                        "Pick an element that renders, or omit ref to capture the whole window.")
-                : null;
+            if (!TryResolveRef(request.Ref.Value, message.Id, out var resolved, out var refError))
+                return refError;
 
-            var mode = string.IsNullOrWhiteSpace(request.Mode) ? ScreenshotModes.Render : request.Mode.Trim();
+            target = resolved as UIElement;
+            if (target is null)
+                return IpcSerializer.CreateError(message.Id,
+                    $"Element ref={request.Ref} cannot be captured because it is not a UIElement. " +
+                    "Pick an element that renders, or omit ref to capture the whole window.");
+        }
 
-            if (mode.Equals(ScreenshotModes.Screen, StringComparison.OrdinalIgnoreCase))
-                return CaptureFromScreen(element, request.MaxWidth);
-
-            if (mode.Equals(ScreenshotModes.Render, StringComparison.OrdinalIgnoreCase))
-                return CaptureByRendering(element, request.MaxWidth);
-
-            throw new InvalidOperationException(
+        // 모드 검증은 문자열 비교뿐이라 UI 스레드가 필요 없다. 잘못된 모드는 예외 대신 여기서 오류로 돌려준다.
+        var mode = string.IsNullOrWhiteSpace(request.Mode) ? ScreenshotModes.Render : request.Mode.Trim();
+        var isScreen = mode.Equals(ScreenshotModes.Screen, StringComparison.OrdinalIgnoreCase);
+        var isRender = mode.Equals(ScreenshotModes.Render, StringComparison.OrdinalIgnoreCase);
+        if (!isScreen && !isRender)
+            return IpcSerializer.CreateError(message.Id,
                 $"Unknown screenshot mode \"{mode}\". Use \"{ScreenshotModes.Render}\" to redraw the visual " +
                 $"tree, or \"{ScreenshotModes.Screen}\" to read what is on the desktop.");
-        });
+
+        var response = await Application.Current.Dispatcher.InvokeAsync(() => isScreen
+            ? CaptureFromScreen(target, request.MaxWidth)
+            : CaptureByRendering(target, request.MaxWidth));
 
         return IpcSerializer.CreateResponse(message.Id, response);
     }
@@ -635,15 +762,19 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleAssert(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<AssertRequest>(message.Payload!.Value);
-        var element = ResolveRef(request.Ref);
+        if (!TryResolveRef(request.Ref, message.Id, out var element, out var error))
+            return error;
 
-        var (actual, passed) = await Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            var prop = PropertyReader.ReadProperty(element, request.Property);
-            var actualValue = prop.Value ?? "null";
-            var pass = actualValue.Equals(request.Expected, StringComparison.OrdinalIgnoreCase);
-            return (actualValue, pass);
-        });
+        var read = await Application.Current.Dispatcher.InvokeAsync(
+            () => PropertyReader.ReadProperty(element, request.Property));
+
+        // 속성을 읽지 못한 것(오타·경로 표기)은 통과/실패가 아니라 오류다. FAIL 로 뭉개면 값이 달랐던
+        // 것처럼 읽혀 원인을 엉뚱한 곳에서 찾게 된다.
+        if (read.Response is not { } prop)
+            return IpcSerializer.CreateError(message.Id, read.Error ?? "property read failed");
+
+        var actual = prop.Value ?? "null";
+        var passed = actual.Equals(request.Expected, StringComparison.OrdinalIgnoreCase);
 
         var response = new ActionResponse
         {
@@ -667,27 +798,28 @@ public sealed class IpcServer
 
         var request = IpcSerializer.DeserializePayload<ElementAtRequest>(message.Payload.Value);
 
-        var response = await Application.Current.Dispatcher.InvokeAsync(() =>
+        var (response, resultError) = await Application.Current.Dispatcher.InvokeAsync<(FindElementResponse?, string?)>(() =>
         {
             var screenPoint = new Point(request.X, request.Y);
 
-            var source = VisualRoots.SourceAt(screenPoint)
-                ?? throw new InvalidOperationException(
+            var source = VisualRoots.SourceAt(screenPoint);
+            if (source is null)
+                return (null,
                     $"No window of this application is on top at ({request.X:F0},{request.Y:F0}). " +
                     "Another application may be covering that point, or the coordinates may be outside the window. " +
                     "Take a screenshot with mode=\"screen\" and read the coordinates from it.");
 
             var elements = VisualRoots.ElementsAt(source, screenPoint, request.MaxAncestors);
             if (elements.Count == 0)
-                throw new InvalidOperationException(
+                return (null,
                     $"Nothing at ({request.X:F0},{request.Y:F0}) takes hit-testing. The point may be over an " +
                     "element with no brush behind it, one with IsHitTestVisible off, or the window border " +
                     "rather than its content.");
 
-            var result = new FindElementResponse();
+            var found = new FindElementResponse();
             foreach (var element in elements)
             {
-                result.Matches.Add(new ElementMatch
+                found.Matches.Add(new ElementMatch
                 {
                     Ref = _refRegistry.Register(element),
                     Type = element.GetType().Name,
@@ -696,8 +828,11 @@ public sealed class IpcServer
                     Text = VisualTree.ElementText.Of(element)
                 });
             }
-            return result;
+            return (found, null);
         });
+
+        if (response is null)
+            return IpcSerializer.CreateError(message.Id, resultError ?? "no element at that point");
 
         return IpcSerializer.CreateResponse(message.Id, response);
     }

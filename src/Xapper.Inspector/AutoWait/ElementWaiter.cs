@@ -33,10 +33,13 @@ public sealed class ElementWaiter
     /// <summary>
     /// UI 요소가 준비 상태가 될 때까지 50ms 간격으로 폴링합니다.
     /// FrameworkElement인 경우 IsVisible, IsEnabled, IsLoaded를 모두 확인.
+    /// 제한 시간 안에 준비되지 않으면 예외 대신 false 를 돌려준다: 주입된 프로세스 안에서 던지면
+    /// 대상 앱의 first-chance 핸들러가 그 예외로 앱을 죽일 수 있고(결함 2), 잠깐 비활성·숨김 상태인
+    /// 컨트롤을 기다리다 시간이 지나는 것은 흔한 정상 경로다.
     /// </summary>
     /// <param name="element">대기할 대상 요소.</param>
-    /// <exception cref="TimeoutException">제한 시간 내에 요소가 준비되지 않은 경우.</exception>
-    public async Task WaitForReady(DependencyObject element)
+    /// <returns>제한 시간 안에 준비되면 true, 아니면 false.</returns>
+    public async Task<bool> WaitForReady(DependencyObject element)
     {
         var deadline = DateTime.UtcNow + _timeout;
 
@@ -51,12 +54,11 @@ public sealed class ElementWaiter
                 return true;
             });
 
-            if (ready) return;
+            if (ready) return true;
             await Task.Delay(PollInterval);
         }
 
-        throw new TimeoutException(
-            $"Element {element.GetType().Name} not ready within {_timeout.TotalMilliseconds}ms");
+        return false;
     }
 
     #endregion

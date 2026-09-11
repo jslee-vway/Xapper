@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
-using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 
 namespace Xapper.Inspector.Actions;
@@ -14,23 +13,21 @@ public static class SelectAction
 {
     /// <summary>
     /// 지정된 Selector 컨트롤에서 항목을 선택합니다.
+    /// 선택할 수 없는 경우(항목 없음·미지원)는 예외 대신 실패 결과로 알린다(결함 2).
     /// </summary>
     /// <param name="element">대상 Selector 요소.</param>
     /// <param name="itemText">선택할 항목의 텍스트. 대소문자 무시 매칭.</param>
     /// <param name="itemIndex">선택할 항목의 0-based 인덱스.</param>
-    /// <exception cref="InvalidOperationException">항목을 찾을 수 없거나 선택을 지원하지 않는 경우.</exception>
-    public static void Execute(DependencyObject element, string? itemText, int? itemIndex)
+    /// <returns>성공 또는 실패 사유.</returns>
+    public static ActionResult Execute(UIElement element, string? itemText, int? itemIndex)
     {
-        if (element is not UIElement uiElement)
-            throw new InvalidOperationException($"Element {element.GetType().Name} is not a UIElement");
-
         // Try Selector-based controls (ComboBox, ListBox, TabControl)
-        if (uiElement is Selector selector)
+        if (element is Selector selector)
         {
             if (itemIndex.HasValue)
             {
                 selector.SelectedIndex = itemIndex.Value;
-                return;
+                return ActionResult.Ok;
             }
 
             if (itemText != null)
@@ -42,22 +39,22 @@ public static class SelectAction
                     if (text.Equals(itemText, StringComparison.OrdinalIgnoreCase))
                     {
                         selector.SelectedIndex = i;
-                        return;
+                        return ActionResult.Ok;
                     }
                 }
-                throw new InvalidOperationException($"Item \"{itemText}\" not found in {element.GetType().Name}");
+                return ActionResult.Fail($"Item \"{itemText}\" not found in {element.GetType().Name}");
             }
         }
 
         // Try AutomationPeer ISelectionItemProvider
-        var peer = UIElementAutomationPeer.CreatePeerForElement(uiElement);
+        var peer = UIElementAutomationPeer.CreatePeerForElement(element);
         if (peer?.GetPattern(PatternInterface.SelectionItem) is ISelectionItemProvider selectionItem)
         {
             selectionItem.Select();
-            return;
+            return ActionResult.Ok;
         }
 
-        throw new InvalidOperationException(
+        return ActionResult.Fail(
             $"Element {element.GetType().Name} does not support selection. Provide a Selector control or element with SelectionItem pattern.");
     }
 }

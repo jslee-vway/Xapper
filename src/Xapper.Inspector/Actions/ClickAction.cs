@@ -56,20 +56,16 @@ public static class ClickAction
     /// <param name="relativeX">요소 내 상대 X 좌표 (0.0~1.0). null이면 기본 클릭.</param>
     /// <param name="relativeY">요소 내 상대 Y 좌표 (0.0~1.0). null이면 기본 클릭.</param>
     /// <returns>수행된 클릭 경로와, 주의가 필요하면 경고 문구.</returns>
-    /// <exception cref="InvalidOperationException">요소가 UIElement가 아닌 경우.</exception>
-    public static ClickOutcome Execute(DependencyObject element, double? relativeX = null, double? relativeY = null)
+    public static ClickOutcome Execute(UIElement element, double? relativeX = null, double? relativeY = null)
     {
-        if (element is not UIElement uiElement)
-            throw new InvalidOperationException($"Element {element.GetType().Name} is not a UIElement");
-
         // 좌표가 지정된 경우: SendInput(ABSOLUTE)으로 원자적 마우스 클릭
         if (relativeX.HasValue && relativeY.HasValue)
-            return ClickAtPosition(uiElement, relativeX.Value, relativeY.Value);
+            return ClickAtPosition(element, relativeX.Value, relativeY.Value);
 
-        var path = RaiseClick(uiElement);
+        var path = RaiseClick(element);
 
         return new ClickOutcome(path,
-            MouseInput.IsReachableByMouse(uiElement, 0.5, 0.5) ? null : UnreachableWarning);
+            MouseInput.IsReachableByMouse(element, 0.5, 0.5) ? null : UnreachableWarning);
     }
 
     #endregion

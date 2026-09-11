@@ -13,41 +13,38 @@ public static class ExpandAction
 {
     /// <summary>
     /// 지정된 UI 요소를 확장 또는 축소합니다.
+    /// 확장/축소를 지원하지 않는 요소는 예외 대신 실패 결과로 알린다(결함 2).
     /// </summary>
     /// <param name="element">대상 요소.</param>
     /// <param name="expand">true이면 확장, false이면 축소.</param>
-    /// <exception cref="InvalidOperationException">요소가 확장/축소를 지원하지 않는 경우.</exception>
-    public static void Execute(DependencyObject element, bool expand)
+    /// <returns>성공 또는 실패 사유.</returns>
+    public static ActionResult Execute(UIElement element, bool expand)
     {
-        if (element is not UIElement uiElement)
-            throw new InvalidOperationException($"Element {element.GetType().Name} is not a UIElement");
-
         // Priority 1: AutomationPeer IExpandCollapseProvider
-        var peer = UIElementAutomationPeer.CreatePeerForElement(uiElement);
+        var peer = UIElementAutomationPeer.CreatePeerForElement(element);
         if (peer?.GetPattern(PatternInterface.ExpandCollapse) is IExpandCollapseProvider expander)
         {
             if (expand)
                 expander.Expand();
             else
                 expander.Collapse();
-            return;
+            return ActionResult.Ok;
         }
 
         // Priority 2: Direct Expander control
-        if (uiElement is Expander expanderControl)
+        if (element is Expander expanderControl)
         {
             expanderControl.IsExpanded = expand;
-            return;
+            return ActionResult.Ok;
         }
 
         // Priority 3: TreeViewItem
-        if (uiElement is TreeViewItem treeItem)
+        if (element is TreeViewItem treeItem)
         {
             treeItem.IsExpanded = expand;
-            return;
+            return ActionResult.Ok;
         }
 
-        throw new InvalidOperationException(
-            $"Element {element.GetType().Name} does not support expand/collapse");
+        return ActionResult.Fail($"Element {element.GetType().Name} does not support expand/collapse");
     }
 }

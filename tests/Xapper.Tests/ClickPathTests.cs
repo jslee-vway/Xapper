@@ -74,15 +74,48 @@ public class ClickPathTests
 public class PropertyReaderTests
 {
     [Fact]
-    public void ReadProperty_WithDottedName_SaysPathsAreNotSupported()
+    public void ReadProperty_WithDottedName_ReturnsAnErrorWithoutThrowing()
     {
         StaThread.Run(() =>
         {
-            var failure = Assert.Throws<InvalidOperationException>(
-                () => PropertyReader.ReadProperty(new Button(), "ItemsSource.Count"));
+            // 던지지 않고 값으로 알린다: 주입된 프로세스 안에서 던지면 대상 앱을 죽일 수 있다(결함 2).
+            var result = PropertyReader.ReadProperty(new Button(), "ItemsSource.Count");
 
-            Assert.Contains("Property paths are not supported", failure.Message);
-            Assert.Contains("ItemsSource", failure.Message);
+            Assert.Null(result.Response);
+            Assert.NotNull(result.Error);
+            Assert.Contains("Property paths are not supported", result.Error);
+            Assert.Contains("ItemsSource", result.Error);
+        });
+    }
+
+    [Fact]
+    public void ReadProperty_WithMissingProperty_ReturnsAnErrorWithoutThrowing()
+    {
+        StaThread.Run(() =>
+        {
+            var result = PropertyReader.ReadProperty(new Button(), "ThisPropertyDoesNotExist");
+
+            Assert.Null(result.Response);
+            Assert.NotNull(result.Error);
+            Assert.Contains("not found", result.Error);
+        });
+    }
+
+    [Fact]
+    public void ReadProperty_WithRealProperty_ReturnsTheValue()
+    {
+        StaThread.Run(() =>
+        {
+            var result = PropertyReader.ReadProperty(new Button { IsEnabled = false }, "IsEnabled");
+
+            Assert.Null(result.Error);
+            if (result.Response is not { } response)
+            {
+                Assert.Fail("expected a property value");
+                return;
+            }
+            Assert.Equal("IsEnabled", response.PropertyName);
+            Assert.Equal("False", response.Value);
         });
     }
 }

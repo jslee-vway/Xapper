@@ -42,9 +42,10 @@ public class IpcResilienceTests
             Assert.Equal(request.Id, response.Id);
             Assert.Equal("response", response.Type);
 
-            // 루프가 살아남는 것만으로는 부족하다. 무슨 일이 있었는지도 남아 있어야 한다.
-            Assert.Single(dropped);
-            Assert.Contains("Connection dropped", dropped.Single());
+            // 어긋난 프레임은 예외로 신호하지 않는다(결함 2): 주입된 프로세스 안에서 던지면 대상 앱의
+            // first-chance 핸들러가 그 예외로 앱을 죽일 수 있다. 어긋난 길이는 정상 종료처럼 조용히
+            // 연결을 정리하므로, 예외를 잡아 남기던 "Connection dropped" 로그도 남지 않는다.
+            Assert.Empty(dropped);
         }
         finally
         {

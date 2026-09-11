@@ -13,30 +13,27 @@ public static class ToggleAction
 {
     /// <summary>
     /// 지정된 UI 요소의 토글 상태를 전환합니다.
+    /// 토글할 수 없는 요소는 예외 대신 실패 결과로 알린다(결함 2).
     /// </summary>
     /// <param name="element">대상 토글 요소.</param>
-    /// <exception cref="InvalidOperationException">요소가 토글을 지원하지 않는 경우.</exception>
-    public static void Execute(DependencyObject element)
+    /// <returns>성공 또는 실패 사유.</returns>
+    public static ActionResult Execute(UIElement element)
     {
-        if (element is not UIElement uiElement)
-            throw new InvalidOperationException($"Element {element.GetType().Name} is not a UIElement");
-
         // Priority 1: AutomationPeer IToggleProvider
-        var peer = UIElementAutomationPeer.CreatePeerForElement(uiElement);
+        var peer = UIElementAutomationPeer.CreatePeerForElement(element);
         if (peer?.GetPattern(PatternInterface.Toggle) is IToggleProvider toggler)
         {
             toggler.Toggle();
-            return;
+            return ActionResult.Ok;
         }
 
         // Priority 2: Direct ToggleButton manipulation
-        if (uiElement is ToggleButton toggleButton)
+        if (element is ToggleButton toggleButton)
         {
             toggleButton.IsChecked = !toggleButton.IsChecked;
-            return;
+            return ActionResult.Ok;
         }
 
-        throw new InvalidOperationException(
-            $"Element {element.GetType().Name} does not support toggle");
+        return ActionResult.Fail($"Element {element.GetType().Name} does not support toggle");
     }
 }

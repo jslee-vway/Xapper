@@ -1,8 +1,5 @@
 using System.Buffers;
 using System.Text.Json;
-#if !NET7_0_OR_GREATER
-using Xapper.Protocol.Polyfills;
-#endif
 
 namespace Xapper.Protocol;
 
@@ -63,21 +60,49 @@ public static class IpcSerializer
     /// </summary>
     /// <param name="stream">Named Pipe 스트림.</param>
     /// <param name="ct">취소 토큰.</param>
-    /// <returns>역직렬화된 <see cref="IpcMessage"/>. 스트림 끝이면 null.</returns>
-    /// <exception cref="InvalidOperationException">메시지 길이가 0 이하이거나 10MB를 초과하는 경우.</exception>
+    /// <returns>역직렬화된 <see cref="IpcMessage"/>. 스트림이 끝났거나 프레임이 어긋났으면 null.</returns>
     public static async Task<IpcMessage?> DeserializeAsync(Stream stream, CancellationToken ct = default)
     {
         var lengthBuffer = new byte[4];
-        await stream.ReadExactlyAsync(lengthBuffer, ct);
+        if (!await TryReadExactlyAsync(stream, lengthBuffer, ct))
+            return null;
+
         var length = BitConverter.ToInt32(lengthBuffer);
 
+        // 잘못된 길이는 스트림이 어긋났다는 뜻이다. 예외를 던지면 대상 프로세스의 first-chance 핸들러가
+        // 그 예외로 앱을 죽일 수 있으므로(결함 2), 던지지 않고 null 로 알려 호출자가 연결을 정리하게 한다.
         if (length <= 0 || length > MaxPayloadBytes)
-            throw new InvalidOperationException($"Invalid message length: {length}");
+            return null;
 
         var jsonBuffer = new byte[length];
-        await stream.ReadExactlyAsync(jsonBuffer, ct);
+        if (!await TryReadExactlyAsync(stream, jsonBuffer, ct))
+            return null;
 
         return JsonSerializer.Deserialize<IpcMessage>(jsonBuffer, Options);
+    }
+
+    /// <summary>
+    /// 버퍼가 가득 찰 때까지 스트림에서 읽습니다. 스트림이 끝나면 예외 대신 false 를 돌려줍니다.
+    /// 정상적인 연결 종료(파이프 닫힘)를 예외로 신호하면, 그 예외가 대상 프로세스의 first-chance
+    /// 핸들러를 건드려 앱을 죽일 수 있다(결함 2). .NET 내장 <c>ReadExactlyAsync</c> 도, net6 폴리필도
+    /// 스트림 끝에서 던지므로 여기서 직접 읽어 값으로 신호한다.
+    /// </summary>
+    /// <param name="stream">읽을 스트림.</param>
+    /// <param name="buffer">채울 버퍼.</param>
+    /// <param name="ct">취소 토큰.</param>
+    /// <returns>버퍼를 다 채웠으면 true, 도중에 스트림이 끝났으면 false.</returns>
+    private static async Task<bool> TryReadExactlyAsync(Stream stream, byte[] buffer, CancellationToken ct)
+    {
+        var offset = 0;
+        while (offset < buffer.Length)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(offset, buffer.Length - offset), ct);
+            if (read == 0)
+                return false;
+            offset += read;
+        }
+
+        return true;
     }
 
     /// <summary>
