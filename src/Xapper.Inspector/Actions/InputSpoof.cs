@@ -16,6 +16,12 @@ namespace Xapper.Inspector.Actions;
 /// 로 묻지 일반 VK_CONTROL 로 묻지 않는다 — 일반 VK 만 스푸프하면 <c>Keyboard.Modifiers</c> 가 None 을 돌려준다
 /// (측정 확인). 그래서 L/R 변형과 일반 VK 를 모두 답한다.
 ///
+/// WPF 는 마우스를 "활성화"할 때 <c>WindowFromPoint(커서)</c> 가 자기 창인지도 확인한다. 커서 위치만 스푸프하면
+/// 그 지점을 다른 프로세스의 창(사용자가 앞에 띄운 창)이 덮고 있을 때 WPF 가 마우스를 활성화하지 않아 합성 클릭이
+/// 조용히 버려진다(측정 확인). 그래서 <c>WindowFromPoint</c> 도 후킹해, 덮은 창이 다른 프로세스 것이면 대상 창을
+/// 답한다 — 사람이 딴 창에서 일하는 동안에도 클릭이 대상에 닿게. 같은 프로세스의 창(팝업·대화상자)이 덮은 경우는
+/// 실제 사용자도 그 창을 누르게 되므로 스푸프하지 않는다(호출자가 <see cref="IsCoveredByOwnWindow"/> 로 미리 걸러 실제 입력으로 폴백).
+///
 /// 스푸프가 켜진 동안 수식키 VK 는 요청된 조합만 눌림으로 답하고 나머지는 0 으로 답한다: Xapper 가 입력을 넣는
 /// 짧은 순간에 사람이 실제로 누르고 있는 키가 섞여 들어가지 않게 격리한다.
 ///
@@ -53,15 +59,17 @@ internal static class InputSpoof
     private static volatile bool _lDown;
     private static volatile bool _rDown;
     private static volatile ModifierKeys _modifiers;
+    private static volatile IntPtr _hwnd;
 
     private static bool _installAttempted;
     private static bool _installed;
 
-    // 트램폴린(원함수): 스푸프가 아닐 때 원래 동작을 부른다. EnableHooks 는 넷이 모두 대입된 뒤에만 켠다.
+    // 트램폴린(원함수): 스푸프가 아닐 때 원래 동작을 부른다. EnableHooks 는 다섯이 모두 대입된 뒤에만 켠다.
     private static GetKeyStateDelegate? _getKeyStateOrig;
     private static GetAsyncKeyStateDelegate? _getAsyncKeyStateOrig;
     private static GetCursorPosDelegate? _getCursorPosOrig;
     private static GetMessagePosDelegate? _getMessagePosOrig;
+    private static WindowFromPointDelegate? _windowFromPointOrig;
 
     // 디투어 델리게이트와 엔진의 정적 루팅(GC 방지).
     private static HookEngine? _engine;
@@ -69,6 +77,7 @@ internal static class InputSpoof
     private static GetAsyncKeyStateDelegate? _getAsyncKeyStateDetour;
     private static GetCursorPosDelegate? _getCursorPosDetour;
     private static GetMessagePosDelegate? _getMessagePosDetour;
+    private static WindowFromPointDelegate? _windowFromPointDetour;
 
     #endregion
 
@@ -94,11 +103,13 @@ internal static class InputSpoof
                 _getAsyncKeyStateDetour = GetAsyncKeyStateHook;
                 _getCursorPosDetour = GetCursorPosHook;
                 _getMessagePosDetour = GetMessagePosHook;
+                _windowFromPointDetour = WindowFromPointHook;
 
                 _getKeyStateOrig = _engine.CreateHook("user32.dll", "GetKeyState", _getKeyStateDetour);
                 _getAsyncKeyStateOrig = _engine.CreateHook("user32.dll", "GetAsyncKeyState", _getAsyncKeyStateDetour);
                 _getCursorPosOrig = _engine.CreateHook("user32.dll", "GetCursorPos", _getCursorPosDetour);
                 _getMessagePosOrig = _engine.CreateHook("user32.dll", "GetMessagePos", _getMessagePosDetour);
+                _windowFromPointOrig = _engine.CreateHook("user32.dll", "WindowFromPoint", _windowFromPointDetour);
                 _engine.EnableHooks();
                 _installed = true;
             }
@@ -115,10 +126,12 @@ internal static class InputSpoof
     /// <summary>
     /// 마우스 제스처용 스푸프를 켭니다: 커서 위치, 버튼(모두 뗀 상태), 수식키. 반드시 <see cref="EndMouse"/> 와 짝지어 호출한다.
     /// </summary>
+    /// <param name="hwnd">제스처를 받을 대상 창. 다른 프로세스의 창이 그 지점을 덮고 있어도 WindowFromPoint 가 이 창을 답한다.</param>
     /// <param name="screen">커서가 있다고 답할 스크린 디바이스 좌표.</param>
     /// <param name="modifiers">눌려 있다고 답할 수식키. None 이면 모든 수식키를 안 눌림으로 답한다.</param>
-    public static void BeginMouse(Point screen, ModifierKeys modifiers)
+    public static void BeginMouse(IntPtr hwnd, Point screen, ModifierKeys modifiers)
     {
+        _hwnd = hwnd;
         SetPosition(screen);
         _lDown = false;
         _rDown = false;
@@ -131,6 +144,7 @@ internal static class InputSpoof
     public static void EndMouse()
     {
         _spoofMouse = false;
+        _hwnd = IntPtr.Zero;
         _spoofModifiers = false;
         _lDown = false;
         _rDown = false;
@@ -166,6 +180,23 @@ internal static class InputSpoof
 
     /// <summary>스푸프 중 오른쪽 버튼이 눌려 있다고 답할지 정합니다.</summary>
     public static void SetRightDown(bool down) => _rDown = down;
+
+    /// <summary>
+    /// 그 지점의 맨 위 창이 <paramref name="hwnd"/> 가 아닌 <b>같은 프로세스의</b> 창(팝업·대화상자)인지 판정합니다.
+    /// 그런 경우 실제 사용자는 그 창을 누르게 되므로 스푸프로 뚫지 않고 호출자가 실제 입력으로 폴백해야 한다.
+    /// 다른 프로세스의 창이 덮은 것은 스푸프가 처리하므로 false.
+    /// </summary>
+    /// <param name="hwnd">제스처 대상 창.</param>
+    /// <param name="screen">확인할 스크린 좌표.</param>
+    public static bool IsCoveredByOwnWindow(IntPtr hwnd, Point screen)
+    {
+        var top = RealWindowAt(screen);
+        if (top == IntPtr.Zero || IsWithin(top, hwnd))
+            return false;
+
+        GetWindowThreadProcessId(top, out var pid);
+        return pid == (uint)Environment.ProcessId;
+    }
 
     #endregion
 
@@ -221,6 +252,40 @@ internal static class InputSpoof
     #endregion
 
     #region Hooks
+
+    /// <summary>스푸프와 무관하게 실제로 그 지점 맨 위에 있는 창을 돌려줍니다(트램폴린 우선, 없으면 원함수).</summary>
+    private static IntPtr RealWindowAt(Point screen)
+    {
+        var point = new POINT { X = (int)Math.Round(screen.X), Y = (int)Math.Round(screen.Y) };
+        var orig = _windowFromPointOrig;
+        return orig is not null ? orig(point) : WindowFromPoint(point);
+    }
+
+    /// <summary>
+    /// <paramref name="window"/> 가 대상 창 자신이거나 그 자손, 또는 같은 최상위 창에 속하는지 판정합니다.
+    /// 대상이 최상위가 아닌 자식 HwndSource(ElementHost 안의 WPF 등)여도 덮인 것으로 오판하지 않게 한다.
+    /// </summary>
+    private static bool IsWithin(IntPtr window, IntPtr target)
+    {
+        return window == target || IsChild(target, window) || GetAncestor(window, GA_ROOT) == target;
+    }
+
+    private static IntPtr WindowFromPointHook(POINT point)
+    {
+        var orig = _windowFromPointOrig;
+        var real = orig is not null ? orig(point) : IntPtr.Zero;
+        if (!_spoofMouse)
+            return real;
+
+        var target = _hwnd;
+        if (target == IntPtr.Zero || real == IntPtr.Zero || IsWithin(real, target))
+            return real;
+
+        // 다른 프로세스의 창이 덮고 있으면 대상 창을 답해 WPF 가 마우스를 활성화하게 한다.
+        // 같은 프로세스의 창이면 실제 답을 유지한다(호출자가 IsCoveredByOwnWindow 로 미리 걸러 폴백한다).
+        GetWindowThreadProcessId(real, out var pid);
+        return pid == (uint)Environment.ProcessId ? real : target;
+    }
 
     private static short GetKeyStateHook(int nVirtKey)
     {
@@ -287,6 +352,24 @@ internal static class InputSpoof
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate uint GetMessagePosDelegate();
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate IntPtr WindowFromPointDelegate(POINT point);
+
+    private const uint GA_ROOT = 2;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsChild(IntPtr parent, IntPtr child);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 
     #endregion
 }

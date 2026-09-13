@@ -200,9 +200,14 @@ internal static class SyntheticMouse
         if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
             return false;
 
+        // 같은 앱의 팝업·대화상자가 그 지점을 덮고 있으면 실제 사용자도 그 창을 누르게 된다. 스푸프로 뚫지 않고
+        // 실제 입력으로 폴백해 그 창이 눌리게 한다(다른 프로세스의 창이 덮은 것은 스푸프가 처리한다).
+        if (InputSpoof.IsCoveredByOwnWindow(hwnd, screen))
+            return false;
+
         lock (Gate)
         {
-            InputSpoof.BeginMouse(screen, modifiers);
+            InputSpoof.BeginMouse(hwnd, screen, modifiers);
             try
             {
                 body(MkFlags(modifiers));

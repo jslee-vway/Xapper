@@ -31,7 +31,9 @@ public sealed class ActionTools
         "could never click. WITH x/y: clicks at that exact point, going through real hit-testing like a user " +
         "would (so it hits whatever is on top). It normally does this by driving the mouse from INSIDE the " +
         "target process, which moves neither the physical cursor nor the keyboard focus - you can keep working " +
-        "while it clicks. Only if that in-process path cannot be set up does it fall back to real mouse input, " +
+        "while it clicks, even with your own windows on top of the target. Only if that in-process path cannot " +
+        "be set up, or a window of the target app itself (a popup or dialog) covers the point, does it fall back " +
+        "to real mouse input, " +
         "which does move the cursor and take focus (the response names which path ran). Default to the event " +
         "mode for routine steps, and switch to x/y when the point of the test IS that a user can physically " +
         "reach the control, or when the response warns that the element is not reachable. Some controls - " +
@@ -84,8 +86,9 @@ public sealed class ActionTools
         "and y are required (unlike xapper_click, there is no event-based double-click). The point goes through " +
         "real hit-testing like a user would, hitting whatever is on top. It normally drives the mouse from " +
         "INSIDE the target process, moving neither the physical cursor nor the keyboard focus, so you can keep " +
-        "working while it clicks; only if that in-process path cannot be set up does it fall back to real mouse " +
-        "input, which moves the cursor and takes focus (the response names which path ran). The two presses are " +
+        "working while it clicks; only if that in-process path cannot be set up, or a window of the target app " +
+        "itself covers the point, does it fall back to real mouse input, which moves the cursor and takes focus " +
+        "(the response names which path ran). The two presses are " +
         "sent close enough together that the application registers them as one double-click - two separate " +
         "xapper_click calls cannot guarantee this, because the gap between calls can exceed the system " +
         "double-click time. For keyboard-driven ways to open an editor (such as F2), use xapper_key instead. " +

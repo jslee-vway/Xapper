@@ -77,7 +77,85 @@ public class SyntheticMouseGestureTests
             });
     }
 
+    [Fact]
+    public void TryClick_WhenAWindowOfThisAppCoversThePoint_FallsBackInsteadOfClickingThrough()
+    {
+        WithWindow(
+            () => new Border { Background = System.Windows.Media.Brushes.LightGray, Width = 120, Height = 60 },
+            (window, hwnd, border) =>
+            {
+                var downs = 0;
+                border.PreviewMouseLeftButtonDown += (_, _) => downs++;
+
+                // 같은 앱의 다른 창(팝업·대화상자에 해당)이 그 지점을 덮는다. 실제 사용자는 그 창을 누르게 되므로
+                // 스푸프로 뚫지 않고 false 를 돌려 호출자가 실제 입력으로 폴백하게 해야 한다.
+                var cover = new Window
+                {
+                    Width = window.Width, Height = window.Height, Left = window.Left, Top = window.Top,
+                    Topmost = true, ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None
+                };
+                cover.Show();
+                try
+                {
+                    Assert.True(InputSpoof.IsCoveredByOwnWindow(hwnd, CentreOf(border)));
+                    Assert.False(SyntheticMouse.TryClick(hwnd, CentreOf(border)));
+                    Assert.Equal(0, downs);
+                }
+                finally
+                {
+                    cover.Close();
+                }
+
+                // 덮개가 사라지면 다시 후킹 경로로 전달된다.
+                Assert.False(InputSpoof.IsCoveredByOwnWindow(hwnd, CentreOf(border)));
+                Assert.True(SyntheticMouse.TryClick(hwnd, CentreOf(border)));
+                Assert.Equal(1, downs);
+            });
+    }
+
+    [Fact]
+    public void WindowFromPoint_WhileSpoofing_AnswersTheTargetForAPointOverAnotherProcess()
+    {
+        WithWindow(
+            () => new Border { Width = 120, Height = 60 },
+            (window, hwnd, _) =>
+            {
+                // 화면 원점 부근은 다른 프로세스의 창(바탕화면·작업표시줄 등)이다. WPF 는 마우스를 활성화할 때
+                // WindowFromPoint(커서) 가 자기 창인지 확인하므로, 스푸프 중에는 대상 창을 답해야 한다.
+                var far = new NativePoint { X = 5, Y = 5 };
+                var real = WindowFromPoint(far);
+                GetWindowThreadProcessId(real, out var pid);
+                if (real == IntPtr.Zero || pid == (uint)Environment.ProcessId)
+                    return; // 이 화면 배치에서는 검증 조건이 안 만들어진다.
+
+                InputSpoof.BeginMouse(hwnd, new Point(5, 5), ModifierKeys.None);
+                try
+                {
+                    Assert.Equal(hwnd, WindowFromPoint(far));
+                }
+                finally
+                {
+                    InputSpoof.EndMouse();
+                }
+
+                Assert.Equal(real, WindowFromPoint(far));
+            });
+    }
+
     #region Helpers
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(NativePoint point);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 
     private static Point CentreOf(FrameworkElement element)
         => element.PointToScreen(new Point(element.ActualWidth / 2, element.ActualHeight / 2));
