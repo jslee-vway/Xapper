@@ -21,28 +21,26 @@ public sealed class DiagnosticTools
     }
 
     [McpServerTool(Name = "xapper_get_property"), Description(
-        "Get a single property value of an element. The name must be one dependency property or public " +
-        "instance property of that exact control type; property paths such as 'ItemsSource.Count' are not " +
-        "resolved and are reported as such. To reach into a value, read the property itself and inspect the " +
-        "result, or find the child elements with xapper_find.")]
+        "Read one property of an element: a dependency property or public property of that control type; " +
+        "paths like ItemsSource.Count are not resolved.")]
     public async Task<string> GetProperty(
-        [Description("Element ref from last snapshot")] int @ref,
         [Description("Property name (e.g., 'Text', 'IsEnabled', 'Visibility', 'Content')")] string propertyName,
+        [Description(ToolDescriptions.Ref)] int? @ref = null,
+        [Description(ToolDescriptions.Target)] string? target = null,
         CancellationToken ct = default)
     {
+        if (@ref is null && target is null)
+            return "Error: pass ref or target.";
+
         var client = _sessionManager.GetActive();
-        var response = await client.GetPropertyAsync(@ref, propertyName, ct);
+        var response = await client.GetPropertyAsync(@ref, target: target, propertyName: propertyName, ct: ct);
 
-        if (response.Type == "error")
-            return $"Error: {response.Payload}";
-
-        var result = IpcSerializer.DeserializePayload<PropertyResponse>(response.Payload!.Value);
-        return $"ref={result.Ref} {result.PropertyName} = \"{result.Value}\" ({result.ValueType})";
+        return ResponseFormat.Property(response);
     }
 
     [McpServerTool(Name = "xapper_get_bindings"), Description("Get data binding info and errors for an element")]
     public async Task<string> GetBindings(
-        [Description("Element ref from last snapshot")] int @ref,
+        [Description("Element ref from snapshot/find")] int @ref,
         CancellationToken ct = default)
     {
         var client = _sessionManager.GetActive();
@@ -68,18 +66,18 @@ public sealed class DiagnosticTools
 
     [McpServerTool(Name = "xapper_assert"), Description("Assert a property value on an element (returns PASS/FAIL)")]
     public async Task<string> Assert(
-        [Description("Element ref from last snapshot")] int @ref,
         [Description("Property name to check")] string property,
         [Description("Expected value (string comparison, case-insensitive)")] string expected,
+        [Description(ToolDescriptions.Ref)] int? @ref = null,
+        [Description(ToolDescriptions.Target)] string? target = null,
         CancellationToken ct = default)
     {
+        if (@ref is null && target is null)
+            return "Error: pass ref or target.";
+
         var client = _sessionManager.GetActive();
-        var response = await client.AssertAsync(@ref, property, expected, ct);
+        var response = await client.AssertAsync(@ref, target: target, property: property, expected: expected, ct: ct);
 
-        if (response.Type == "error")
-            return $"Error: {response.Payload}";
-
-        var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
-        return result.Message ?? (result.Success ? "PASS" : "FAIL");
+        return ResponseFormat.Assert(response);
     }
 }

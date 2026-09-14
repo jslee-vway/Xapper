@@ -15,6 +15,9 @@ public sealed class KeyRequest
     /// <summary>먼저 키보드 포커스를 줄 대상 요소의 참조 번호. 생략 시 현재 포커스 요소에 보낸다.</summary>
     public int? Ref { get; set; }
 
+    /// <summary>요소를 찾는 selector("id=…", "name=…", "text=…", "type=…", 콤마로 AND). Ref 가 없을 때 쓴다.</summary>
+    public string? Target { get; set; }
+
     /// <summary>요소가 준비될 때까지 대기하는 최대 시간 (밀리초). 기본값 5000ms.</summary>
     public int Timeout { get; set; } = 5000;
 }

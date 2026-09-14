@@ -6,8 +6,11 @@ namespace Xapper.Protocol.Messages.Requests;
 /// </summary>
 public sealed class WheelRequest
 {
-    /// <summary>휠을 굴릴 대상 요소의 참조 번호.</summary>
-    public int Ref { get; set; }
+    /// <summary>휠을 굴릴 대상 요소의 참조 번호. null 이면 Target 으로 찾는다.</summary>
+    public int? Ref { get; set; }
+
+    /// <summary>요소를 찾는 selector("id=…", "name=…", "text=…", "type=…", 콤마로 AND). Ref 가 없을 때 쓴다.</summary>
+    public string? Target { get; set; }
 
     /// <summary>굴릴 눈금 수. 양수는 위(앞), 음수는 아래(뒤). 0 은 오류.</summary>
     public int Notches { get; set; }

@@ -1,7 +1,5 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
-using Xapper.Protocol;
-using Xapper.Protocol.Messages.Responses;
 
 namespace Xapper.McpServer.Tools;
 
@@ -13,8 +11,7 @@ public sealed class ActionTools
 {
     /// <summary>수식키 파라미터 설명. 에이전트가 정확한 문자열을 넘기도록 허용 어휘를 그대로 적는다.</summary>
     private const string ModifiersDescription =
-        "Modifier keys to hold during the action: exactly \"Ctrl\", \"Shift\" or \"Alt\", or a combination " +
-        "joined with '+', e.g. \"Ctrl+Shift\". Case-insensitive. Omit for none.";
+        "Modifiers to hold: \"Ctrl\", \"Shift\", \"Alt\" or a combination like \"Ctrl+Shift\"";
 
     private readonly SessionManager _sessionManager;
 
@@ -24,44 +21,20 @@ public sealed class ActionTools
     }
 
     [McpServerTool(Name = "xapper_click"), Description(
-        "Click a UI element by ref. Decide the mode before calling; the two modes differ in fidelity. " +
-        "WITHOUT x/y: uses the accessibility Invoke pattern and raised events. Fast, does not move the physical " +
-        "cursor, and works even when the window is not in front - but it SKIPS hit-testing, so it will report " +
-        "success on a button that is covered by an overlay or has IsHitTestVisible=false, which a real user " +
-        "could never click. WITH x/y: clicks at that exact point, going through real hit-testing like a user " +
-        "would (so it hits whatever is on top). It normally does this by driving the mouse from INSIDE the " +
-        "target process, which moves neither the physical cursor nor the keyboard focus - you can keep working " +
-        "while it clicks, even with your own windows on top of the target. Only if that in-process path cannot " +
-        "be set up, or a window of the target app itself (a popup or dialog) covers the point, does it fall back " +
-        "to real mouse input, " +
-        "which does move the cursor and take focus (the response names which path ran). Default to the event " +
-        "mode for routine steps, and switch to x/y when the point of the test IS that a user can physically " +
-        "reach the control, or when the response warns that the element is not reachable. Some controls - " +
-        "notably DevExpress grids (GridControl/TableView, TreeListControl) - only change focus or selection " +
-        "for genuine mouse input, so the event mode leaves FocusedRowHandle unchanged; use x/y on those. " +
-        "What the event mode does depends on the element, and the response names " +
-        "the path it took - check it when a click appears to do nothing. A control with an accessibility " +
-        "pattern is invoked or toggled through it, and a ButtonBase-derived control whose peer offers neither " +
-        "has its click event raised instead; neither produces any mouse event. Everything else falls back to " +
-        "four simulated routed events, which do reach " +
-        "MouseLeftButtonDown/Up handlers, but only the Left-specific ones - a handler on MouseDown, MouseUp or " +
-        "PreviewMouseDown still never runs, and there is no hit-test, no mouse capture and no real device " +
-        "state behind them. Use x/y when the element depends on any of that. The Invoke and Toggle paths queue " +
-        "their work on the UI thread rather than running it inline, so this call waits for that queue to drain " +
-        "before " +
-        "answering; when it returns the application has processed the click, unless the response says it was " +
-        "still busy or still handling the click - the latter means a modal dialog most likely opened, and the " +
-        "call returned after timeout rather than waiting for the person to close it. There is no double-click: " +
-        "two coordinate clicks in a row may not register as one, " +
-        "because the interval between calls exceeds the system double-click time. The response also warns " +
-        "when the element is unreachable by a real mouse, or when the window could not be activated. " +
-        "To double-click, use xapper_doubleclick instead. Pass modifiers (e.g. \"Ctrl\") for a Ctrl-click or " +
-        "Shift-click; modifiers require x/y because they only apply to a real point click.")]
+        "Click an element. Without x/y: accessibility Invoke/Toggle or the ButtonBase click event - fast, no " +
+        "cursor, works behind other windows, but skips hit-testing (a covered control still 'succeeds'; the " +
+        "response warns). With x/y (0-1 within the element): a real hit-tested click driven inside the target " +
+        "process - no cursor or focus change, even under your own windows; falls back to real mouse input " +
+        "only if that path is unavailable or the app's own popup/dialog covers the point (the response says " +
+        "which). Use x/y for controls that need genuine mouse input (DevExpress grids). modifiers need x/y. " +
+        "If the click opens a modal dialog the call returns after timeout with a note. The response names the " +
+        "path taken - check it when a click seems to do nothing. For a double-click use xapper_doubleclick.")]
     public async Task<string> Click(
-        [Description("Element ref from last snapshot")] int @ref,
-        [Description("Relative X position within element (0.0=left, 1.0=right). Omit for event-based click.")] double? x = null,
-        [Description("Relative Y position within element (0.0=top, 1.0=bottom). Omit for event-based click.")] double? y = null,
-        [Description("Timeout in ms (default 5000). Spent twice - first waiting for the element to be ready, then bounding the wait for the click to be processed - so the worst case is about double this value")] int timeout = 5000,
+        [Description(ToolDescriptions.Ref)] int? @ref = null,
+        [Description(ToolDescriptions.Target)] string? target = null,
+        [Description("X 0-1 within the element; omit for the event-based click")] double? x = null,
+        [Description("Y 0-1 within the element; omit for the event-based click")] double? y = null,
+        [Description("Timeout in ms (default 5000), spent twice: waiting for the element, then for the click to be processed")] int timeout = 5000,
         [Description(ModifiersDescription)] string? modifiers = null,
         CancellationToken ct = default)
     {
@@ -72,164 +45,125 @@ public sealed class ActionTools
         if (!string.IsNullOrWhiteSpace(modifiers) && !x.HasValue)
             return "Error: modifiers need x/y - a modified click happens at a point. Supply x and y.";
 
+        if (@ref is null && target is null)
+            return "Error: pass ref or target.";
+
         var client = _sessionManager.GetActive();
-        var response = await client.ClickAsync(@ref, timeout, x, y, doubleClick: false, modifiers: modifiers, ct: ct);
+        var response = await client.ClickAsync(@ref, target: target, timeout: timeout, x: x, y: y, doubleClick: false, modifiers: modifiers, ct: ct);
 
-        if (response.Type == "error")
-            return $"Error: {response.Payload}";
-
-        var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
-        return result.Success ? result.Message ?? "Click succeeded" : $"Failed: {result.Error}";
+        return ResponseFormat.Action(response, "Click succeeded");
     }
 
     [McpServerTool(Name = "xapper_doubleclick"), Description(
-        "Double-click a point inside a UI element by ref. A double-click is a gesture AT a location - for " +
-        "example double-clicking a grid row or cell to open its editor, or a list item to activate it - so x " +
-        "and y are required (unlike xapper_click, there is no event-based double-click). The point goes through " +
-        "real hit-testing like a user would, hitting whatever is on top. It normally drives the mouse from " +
-        "INSIDE the target process, moving neither the physical cursor nor the keyboard focus, so you can keep " +
-        "working while it clicks; only if that in-process path cannot be set up, or a window of the target app " +
-        "itself covers the point, does it fall back to real mouse input, which moves the cursor and takes focus " +
-        "(the response names which path ran). The two presses are " +
-        "sent close enough together that the application registers them as one double-click - two separate " +
-        "xapper_click calls cannot guarantee this, because the gap between calls can exceed the system " +
-        "double-click time. For keyboard-driven ways to open an editor (such as F2), use xapper_key instead. " +
-        "Pass modifiers for a Ctrl- or Shift-double-click.")]
+        "Double-click at a point (x/y required, 0-1 within the element), e.g. a grid cell to open its editor. " +
+        "Same in-process, cursor-free path as xapper_click; the two presses are close enough to register as " +
+        "one double-click, which two xapper_click calls cannot guarantee. When the editor opens on a key, " +
+        "prefer xapper_key F2.")]
     public async Task<string> DoubleClick(
-        [Description("Element ref from last snapshot")] int @ref,
-        [Description("Relative X position within element (0.0=left, 1.0=right)")] double x,
-        [Description("Relative Y position within element (0.0=top, 1.0=bottom)")] double y,
-        [Description("Timeout in ms (default 5000). Spent twice - first waiting for the element to be ready, then bounding the wait for the double-click to be processed - so the worst case is about double this value")] int timeout = 5000,
+        [Description("X 0-1 within the element")] double x,
+        [Description("Y 0-1 within the element")] double y,
+        [Description(ToolDescriptions.Ref)] int? @ref = null,
+        [Description(ToolDescriptions.Target)] string? target = null,
+        [Description("Timeout in ms (default 5000), spent twice: waiting for the element, then for the double-click to be processed")] int timeout = 5000,
         [Description(ModifiersDescription)] string? modifiers = null,
         CancellationToken ct = default)
     {
+        if (@ref is null && target is null)
+            return "Error: pass ref or target.";
+
         var client = _sessionManager.GetActive();
-        var response = await client.ClickAsync(@ref, timeout, x, y, doubleClick: true, modifiers: modifiers, ct: ct);
+        var response = await client.ClickAsync(@ref, target: target, timeout: timeout, x: x, y: y, doubleClick: true, modifiers: modifiers, ct: ct);
 
-        if (response.Type == "error")
-            return $"Error: {response.Payload}";
-
-        var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
-        return result.Success ? result.Message ?? "Double-click succeeded" : $"Failed: {result.Error}";
+        return ResponseFormat.Action(response, "Double-click succeeded");
     }
 
     [McpServerTool(Name = "xapper_rightclick"), Description(
-        "Right-click a point inside a UI element by ref - typically to open its context menu. Always a coordinate " +
-        "gesture (there is no accessibility right-click), so it goes through real hit-testing; x/y default to the " +
-        "element's centre. Driven from INSIDE the target process, moving neither the physical cursor nor the " +
-        "keyboard focus; only if that path cannot be set up does it fall back to real mouse input (the response " +
-        "names which path ran). After it, snapshot again to see the opened menu. Pass modifiers for a Shift- or " +
-        "Ctrl-right-click.")]
+        "Right-click a point in the element (x/y default centre) to open its context menu; in-process and " +
+        "cursor-free, real-input fallback only if unavailable. Snapshot afterwards to see the menu (menus are " +
+        "separate windows).")]
     public async Task<string> RightClick(
-        [Description("Element ref from last snapshot")] int @ref,
-        [Description("Relative X within element (0.0=left, 1.0=right). Default 0.5")] double? x = null,
-        [Description("Relative Y within element (0.0=top, 1.0=bottom). Default 0.5")] double? y = null,
+        [Description(ToolDescriptions.Ref)] int? @ref = null,
+        [Description(ToolDescriptions.Target)] string? target = null,
+        [Description("X 0-1 within the element (default 0.5)")] double? x = null,
+        [Description("Y 0-1 within the element (default 0.5)")] double? y = null,
         [Description(ModifiersDescription)] string? modifiers = null,
         [Description("Timeout in ms (default 5000)")] int timeout = 5000,
         CancellationToken ct = default)
     {
+        if (@ref is null && target is null)
+            return "Error: pass ref or target.";
+
         var client = _sessionManager.GetActive();
-        var response = await client.RightClickAsync(@ref, x, y, modifiers, timeout, ct);
+        var response = await client.RightClickAsync(@ref, target: target, x: x, y: y, modifiers: modifiers, timeout: timeout, ct: ct);
 
-        if (response.Type == "error")
-            return $"Error: {response.Payload}";
-
-        var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
-        return result.Success ? result.Message ?? "Right-click succeeded" : $"Failed: {result.Error}";
+        return ResponseFormat.Action(response, "Right-click succeeded");
     }
 
     [McpServerTool(Name = "xapper_wheel"), Description(
-        "Roll the mouse wheel over a point inside a UI element by ref. This is a REAL wheel gesture, unlike " +
-        "xapper_scroll which sets a ScrollViewer's offset directly - use xapper_wheel when the point of the test is " +
-        "wheel behaviour: Ctrl+wheel zoom (pass modifiers=\"Ctrl\"), custom MouseWheel handlers, or controls that " +
-        "only scroll on a genuine wheel. notches: positive rolls up/away from you, negative rolls down/toward you; " +
-        "one notch is one standard wheel click; allowed range is -100..100 (call again for more). x/y default to " +
-        "the element's centre. Driven from INSIDE the target process (no cursor movement); falls back to real " +
-        "input only if that path is unavailable (the response names which path ran).")]
+        "Roll the mouse wheel over a point in the element: a genuine wheel gesture, unlike xapper_scroll " +
+        "which sets a ScrollViewer offset. Use it for Ctrl+wheel zoom (modifiers=\"Ctrl\") or handlers that " +
+        "react only to real wheel input. notches: positive = up, negative = down, non-zero, within -100..100. " +
+        "In-process and cursor-free; real-input fallback only if unavailable.")]
     public async Task<string> Wheel(
-        [Description("Element ref from last snapshot")] int @ref,
-        [Description("Notches to roll: positive = up/away, negative = down/toward you. Non-zero, between -100 and 100")] int notches,
-        [Description("Relative X within element (0.0=left, 1.0=right). Default 0.5")] double? x = null,
-        [Description("Relative Y within element (0.0=top, 1.0=bottom). Default 0.5")] double? y = null,
+        [Description("Notches: +up / -down, non-zero, within -100..100")] int notches,
+        [Description(ToolDescriptions.Ref)] int? @ref = null,
+        [Description(ToolDescriptions.Target)] string? target = null,
+        [Description("X 0-1 within the element (default 0.5)")] double? x = null,
+        [Description("Y 0-1 within the element (default 0.5)")] double? y = null,
         [Description(ModifiersDescription)] string? modifiers = null,
         [Description("Timeout in ms (default 5000)")] int timeout = 5000,
         CancellationToken ct = default)
     {
+        if (@ref is null && target is null)
+            return "Error: pass ref or target.";
+
         var client = _sessionManager.GetActive();
-        var response = await client.WheelAsync(@ref, notches, x, y, modifiers, timeout, ct);
+        var response = await client.WheelAsync(@ref, target: target, notches: notches, x: x, y: y, modifiers: modifiers, timeout: timeout, ct: ct);
 
-        if (response.Type == "error")
-            return $"Error: {response.Payload}";
-
-        var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
-        return result.Success ? result.Message ?? "Wheel succeeded" : $"Failed: {result.Error}";
+        return ResponseFormat.Action(response, "Wheel succeeded");
     }
 
     [McpServerTool(Name = "xapper_type"), Description(
-        "Enter text into an editable element by ref - the tool to use for any text longer than one key. Sets the " +
-        "value through the element's accessibility Value pattern or TextBox.Text when it has one; otherwise it " +
-        "focuses the element and types the text as real keystrokes inside the target process, so it also works " +
-        "on editors without a value pattern (RichTextBox, grid cell editors, DevExpress text editors). Omit ref to " +
-        "type into whatever currently has keyboard focus - the way to fill an inline editor you just opened with F2 " +
-        "or a double-click, which has no ref until the next snapshot. The text is always entered literally. Do NOT " +
-        "spell a word out with one xapper_key call per letter - one xapper_type call enters the whole string. Use " +
-        "xapper_key only for named keys (Enter, Tab, F2, arrows) and key chords. The keystroke path cannot tell " +
-        "whether the element accepted the characters (a focused button just ignores them), so read the value back " +
-        "with xapper_get_property when it matters.")]
+        "Enter text into an editable element - use this for any text, never one xapper_key call per letter. " +
+        "Sets the value through the accessibility Value pattern or TextBox.Text; otherwise focuses the " +
+        "element and types real keystrokes, so it also works on RichTextBox, grid cell editors and DevExpress " +
+        "editors. Omit ref/target to type into the currently focused editor (e.g. right after F2). Text is " +
+        "entered literally. The keystroke path cannot detect rejection - read the value back when it matters.")]
     public async Task<string> Type(
         [Description("Text to type into the element")] string text,
-        [Description("Element ref from last snapshot. Omit to type into the element that currently has keyboard focus")] int? @ref = null,
+        [Description("Element ref; omit ref and target to use the focused element")] int? @ref = null,
+        [Description(ToolDescriptions.Target)] string? target = null,
         [Description("If true, clears existing text first (default true)")] bool clear = true,
         [Description("Timeout in ms (default 5000)")] int timeout = 5000,
         CancellationToken ct = default)
     {
         var client = _sessionManager.GetActive();
-        var response = await client.TypeAsync(@ref, text, clear, timeout, ct);
+        var response = await client.TypeAsync(@ref, target: target, text: text, clear: clear, timeout: timeout, ct: ct);
 
-        if (response.Type == "error")
-            return $"Error: {response.Payload}";
-
-        var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
-        return result.Success ? result.Message ?? "Type succeeded" : $"Failed: {result.Error}";
+        return ResponseFormat.Action(response, "Type succeeded");
     }
 
     [McpServerTool(Name = "xapper_key"), Description(
-        "Send a keystroke to the target's keyboard focus, driven from INSIDE the target process. Unlike " +
-        "sending keys to the OS - which go to whatever window is in the foreground and leak into whatever the " +
-        "person is doing - this routes the key to the application's own Keyboard.FocusedElement, so it works " +
-        "no matter which window is in front and the person can keep working. Use it for keys the mouse cannot " +
-        "express: F2 to open a grid cell editor, Enter to commit, Escape to cancel, Tab to move focus, arrow " +
-        "keys to navigate. key is a WPF Key name (\"F2\", \"Enter\", \"Escape\", \"Tab\", \"Down\"), a single " +
-        "printable character (\"a\", \"7\"), or a longer string such as \"qwerty\" which is typed as one " +
-        "keystroke per character in this single call - never issue one call per letter. A string that happens to " +
-        "be a Key name is sent as that key, not typed: this includes common words (Enter, Tab, Space, Home, End, " +
-        "Help, Print, Select, Cancel, Clear, Insert, Delete, Pause, Play, Zoom, Up, Down, Left, Right, Add, Divide, " +
-        "Scroll, Sleep) and short codes like \"D1\" or \"F5\". To enter any text literally - including into an " +
-        "editor you just opened - use xapper_type (omit its ref to target the focused editor). Pass ref to " +
-        "focus that element first; omit it to send to whatever currently has focus (for example the cell you " +
-        "just clicked). The response names the key and the element that holds focus afterwards. " +
-        "Modifiers ARE supported: pass modifiers=\"Ctrl\" for Ctrl+Z, \"Ctrl+Shift\" for combos. They are held from " +
-        "inside the target process (no real key is pressed and nothing leaks to other windows). If that in-process " +
-        "path cannot be set up in this process the call returns an error rather than pressing real keys. A " +
-        "character with Ctrl or Alt is sent as a key chord only, not typed (Ctrl+a selects all, it does not insert " +
-        "'a'). xapper_key is for keys and chords; xapper_type is for text. If the key opens a modal dialog " +
-        "(a MessageBox asking to confirm a delete, say), the call does not wait for the person to answer it: it " +
-        "returns after timeout saying the application is still handling the key, and the dialog is a Win32 window " +
-        "you can see with xapper_screenshot mode=\"screen\" but not in a snapshot.")]
+        "Send a key or chord to the app's keyboard focus from inside the process: works whatever window is in " +
+        "front and never leaks into other apps. key is a WPF Key name (F2, Enter, Escape, Tab, Down), one " +
+        "character, or a longer string typed character by character in one call. A string that is itself a " +
+        "Key name (Enter, Space, Home, End, Delete, Help, Print, Select, Clear, Insert, Up, Down, Left, " +
+        "Right, D1, F5 ...) is sent as that key - for literal text use xapper_type. modifiers (\"Ctrl\", " +
+        "\"Shift\", \"Alt\", \"Ctrl+Shift\") are held in-process without real key presses; Ctrl/Alt + a character " +
+        "is a chord, not typed. ref/target focuses that element first, otherwise the focused one. If the key " +
+        "opens a modal dialog the call returns after timeout with a note; the dialog is a Win32 window - see " +
+        "it with xapper_screenshot mode=\"screen\", not in a snapshot.")]
     public async Task<string> Key(
-        [Description("Key to send: a WPF Key name (F2, Enter, Escape, Tab, Down), a single printable character, or a string to type character by character in this one call")] string key,
+        [Description("WPF Key name (F2, Enter, Tab, Down), one character, or a string to type")] string key,
         [Description(ModifiersDescription)] string? modifiers = null,
-        [Description("Element ref to focus first (omit to send to the currently focused element)")] int? @ref = null,
+        [Description("Element ref to focus first (omit, along with target, to send to the currently focused element)")] int? @ref = null,
+        [Description(ToolDescriptions.Target)] string? target = null,
         [Description("Timeout in ms (default 5000)")] int timeout = 5000,
         CancellationToken ct = default)
     {
         var client = _sessionManager.GetActive();
-        var response = await client.KeyAsync(key, modifiers, @ref, timeout, ct);
+        var response = await client.KeyAsync(key, modifiers: modifiers, @ref: @ref, target: target, timeout: timeout, ct: ct);
 
-        if (response.Type == "error")
-            return $"Error: {response.Payload}";
-
-        var result = IpcSerializer.DeserializePayload<ActionResponse>(response.Payload!.Value);
-        return result.Success ? result.Message ?? "Key sent" : $"Failed: {result.Error}";
+        return ResponseFormat.Action(response, "Key sent");
     }
 }

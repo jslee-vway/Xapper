@@ -157,6 +157,7 @@ public sealed class IpcServer
         return IpcSerializer.CreateResponse(messageId, new ActionResponse
         {
             Success = true,
+            Pending = true,
             Message = $"{what} was delivered, but the application has not finished handling it after {timeoutMs} ms. " +
                       "It is most likely showing a modal dialog (a MessageBox is a Win32 window and does not appear in " +
                       "snapshots - use xapper_screenshot with mode=\"screen\" to see it). The person has to dismiss it; " +
@@ -243,6 +244,78 @@ public sealed class IpcServer
             $"Element ref={elementRef} did not become visible, enabled and loaded within {timeoutMs} ms. " +
             "It may be disabled until a form validates, hidden behind another view, or still loading. " +
             "Re-read the state, or raise the timeout.");
+    }
+
+    /// <summary>
+    /// 요청이 가리키는 요소의 참조 번호를 정합니다. ref 가 있으면 그대로 쓰고, 없으면 target selector 로
+    /// 열려 있는 모든 창을 검색해 정확히 하나가 나올 때만 그 번호를 돌려준다. 0개·여러 개·잘못된 selector·둘 다 없음은
+    /// 모두 흔한 정상 경로이므로 예외 대신 오류 응답으로 알린다(결함 2). 돌려준 번호는 레지스트리에 등록돼 있어
+    /// 기존 <see cref="TryResolveRef"/> / <see cref="TryResolveUiElement"/> 에 그대로 넣을 수 있다.
+    /// </summary>
+    /// <param name="elementRef">요청에 실린 참조 번호. 있으면 target 은 보지 않는다.</param>
+    /// <param name="target">요청에 실린 selector("id=…", "name=…", "text=…", "type=…", 콤마로 AND).</param>
+    /// <param name="messageId">응답에 실을 메시지 ID.</param>
+    /// <returns>정해진 참조 번호와, 실패했을 때의 오류 응답.</returns>
+    private async Task<(int Ref, IpcMessage? Error)> ResolveTargetAsync(int? elementRef, string? target, string messageId)
+    {
+        if (elementRef is { } knownRef)
+            return (knownRef, null);
+
+        if (target is null)
+            return (0, IpcSerializer.CreateError(messageId,
+                "Pass ref (from a snapshot or find) or target (\"id=…\", \"name=…\", \"text=…\", \"type=…\", " +
+                "comma-separated for AND)."));
+
+        if (!TargetSelector.TryParse(target, out var query, out var parseError))
+            return (0, IpcSerializer.CreateError(messageId, parseError));
+
+        var matches = await Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            var finder = new ElementFinder();
+            var all = new List<ElementMatch>();
+
+            // find 와 같은 범위를 훑는다: 팝업·메뉴·드롭다운도 각자 최상위 창이라 여기에 포함된다.
+            foreach (var source in VisualRoots.Sources())
+                all.AddRange(finder.Find(source.RootVisual, query, _refRegistry).Matches);
+
+            return all;
+        });
+
+        if (matches.Count == 0)
+            return (0, IpcSerializer.CreateError(messageId,
+                $"No element matches target \"{target}\". Use xapper_find to see what exists, or pass ref."));
+
+        if (matches.Count > 1)
+            return (0, IpcSerializer.CreateError(messageId, AmbiguousTargetMessage(target, matches)));
+
+        return (matches[0].Ref, null);
+    }
+
+    /// <summary>
+    /// target 이 여러 요소에 맞았을 때, 후보를 ref 와 함께 나열해 selector 를 좁히거나 ref 를 고르게 하는 문구를 만듭니다.
+    /// 목록은 10개까지만 싣는다.
+    /// </summary>
+    private static string AmbiguousTargetMessage(string target, List<ElementMatch> matches)
+    {
+        const int maxListed = 10;
+
+        var listed = matches.Take(maxListed).Select(match =>
+        {
+            var text = $"[ref={match.Ref}] {match.Type}";
+            if (!string.IsNullOrEmpty(match.Name))
+                text += $" name=\"{match.Name}\"";
+            if (!string.IsNullOrEmpty(match.AutomationId))
+                text += $" id=\"{match.AutomationId}\"";
+            if (!string.IsNullOrEmpty(match.Text))
+                text += $" text=\"{match.Text}\"";
+            return text;
+        });
+
+        var message = $"target \"{target}\" matches {matches.Count} elements - refine it or pass ref: " +
+                      string.Join("; ", listed);
+        if (matches.Count > maxListed)
+            message += $"; … and {matches.Count - maxListed} more";
+        return message;
     }
 
     /// <summary>
@@ -382,12 +455,15 @@ public sealed class IpcServer
         if (!ModifierParser.TryParse(request.Modifiers, out var modifiers, out var modifierError))
             return IpcSerializer.CreateError(message.Id, modifierError);
 
-        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+        var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+        if (targetError is not null)
+            return targetError;
+        if (!TryResolveUiElement(elementRef, message.Id, out var element, out var error))
             return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, request.Ref, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout);
 
         var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
 
@@ -404,7 +480,7 @@ public sealed class IpcServer
             if (hooked)
             {
                 var hookVerb = request.DoubleClick ? "Double-clicked" : "Clicked";
-                var hookText = $"{hookVerb}{withMods} ref={request.Ref} at ({request.X:F2},{request.Y:F2}) " +
+                var hookText = $"{hookVerb}{withMods} ref={elementRef} at ({request.X:F2},{request.Y:F2}) " +
                                "via synthetic mouse input (no cursor movement)";
                 return IpcSerializer.CreateResponse(message.Id,
                     new ActionResponse { Success = true, Message = await SettleAsync(hookText, request.Timeout) });
@@ -415,13 +491,13 @@ public sealed class IpcServer
         var (clickDone, outcome) = await RunOnUiThread(
             () => ClickAction.Execute(element, request.X, request.Y, request.DoubleClick, modifiers), request.Timeout);
         if (!clickDone)
-            return StillHandlingResponse(message.Id, $"The click on ref={request.Ref}", request.Timeout);
+            return StillHandlingResponse(message.Id, $"The click on ref={elementRef}", request.Timeout);
 
         var posInfo = request.X.HasValue && request.Y.HasValue
             ? $" at ({request.X:F2},{request.Y:F2})"
             : "";
         var verb = request.DoubleClick ? "Double-clicked" : "Clicked";
-        var text = $"{verb}{withMods} ref={request.Ref}{posInfo} via {outcome.Path}";
+        var text = $"{verb}{withMods} ref={elementRef}{posInfo} via {outcome.Path}";
         if (outcome.Warning is not null)
             text += $" | {outcome.Warning}";
 
@@ -480,12 +556,15 @@ public sealed class IpcServer
         if (!ModifierParser.TryParse(request.Modifiers, out var modifiers, out var modifierError))
             return IpcSerializer.CreateError(message.Id, modifierError);
 
-        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+        var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+        if (targetError is not null)
+            return targetError;
+        if (!TryResolveUiElement(elementRef, message.Id, out var element, out var error))
             return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, request.Ref, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout);
 
         var rx = request.X ?? 0.5;
         var ry = request.Y ?? 0.5;
@@ -496,7 +575,7 @@ public sealed class IpcServer
             screen => MouseInput.RightClickAt(screen),
             "click");
 
-        var text = $"Right-clicked{withMods} ref={request.Ref} at ({rx:F2},{ry:F2}) via {how}";
+        var text = $"Right-clicked{withMods} ref={elementRef} at ({rx:F2},{ry:F2}) via {how}";
         if (warning is not null)
             text += " | WARNING: " + warning;
 
@@ -523,12 +602,15 @@ public sealed class IpcServer
         if (!ModifierParser.TryParse(request.Modifiers, out var modifiers, out var modifierError))
             return IpcSerializer.CreateError(message.Id, modifierError);
 
-        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+        var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+        if (targetError is not null)
+            return targetError;
+        if (!TryResolveUiElement(elementRef, message.Id, out var element, out var error))
             return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, request.Ref, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout);
 
         var rx = request.X ?? 0.5;
         var ry = request.Y ?? 0.5;
@@ -540,7 +622,7 @@ public sealed class IpcServer
             "wheel");
 
         var direction = request.Notches > 0 ? "up" : "down";
-        var text = $"Wheeled {Math.Abs(request.Notches)} notch(es) {direction}{withMods} on ref={request.Ref} at ({rx:F2},{ry:F2}) via {how}";
+        var text = $"Wheeled {Math.Abs(request.Notches)} notch(es) {direction}{withMods} on ref={elementRef} at ({rx:F2},{ry:F2}) via {how}";
         if (warning is not null)
             text += " | WARNING: " + warning;
 
@@ -566,8 +648,8 @@ public sealed class IpcServer
     {
         var request = IpcSerializer.DeserializePayload<TypeTextRequest>(message.Payload!.Value);
 
-        // ref 가 없으면 현재 포커스 요소에 키 입력으로 타이핑한다(F2 로 연 인라인 편집기처럼 스냅샷에 없는 편집기).
-        if (request.Ref is not { } elementRef)
+        // ref 도 target 도 없으면 현재 포커스 요소에 키 입력으로 타이핑한다(F2 로 연 인라인 편집기처럼 스냅샷에 없는 편집기).
+        if (request.Ref is null && request.Target is null)
         {
             var (focusedDone, focusedResult) = await RunOnUiThread(
                 () => TypeAction.ExecuteOnFocused(request.Text, request.Clear), request.Timeout);
@@ -583,6 +665,9 @@ public sealed class IpcServer
             });
         }
 
+        var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+        if (targetError is not null)
+            return targetError;
         if (!TryResolveUiElement(elementRef, message.Id, out var element, out var error))
             return error;
 
@@ -615,9 +700,13 @@ public sealed class IpcServer
         if (!ModifierParser.TryParse(request.Modifiers, out var modifiers, out var modifierError))
             return IpcSerializer.CreateError(message.Id, modifierError);
 
+        // ref 도 target 도 없으면 현재 포커스 요소에 보낸다.
         DependencyObject? refElement = null;
-        if (request.Ref is { } elementRef)
+        if (request.Ref is not null || request.Target is not null)
         {
+            var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+            if (targetError is not null)
+                return targetError;
             if (!TryResolveRef(elementRef, message.Id, out refElement, out var error))
                 return error;
 
@@ -653,24 +742,28 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleSelect(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<SelectRequest>(message.Payload!.Value);
-        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+
+        var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+        if (targetError is not null)
+            return targetError;
+        if (!TryResolveUiElement(elementRef, message.Id, out var element, out var error))
             return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, request.Ref, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout);
 
         var (selectDone, result) = await RunOnUiThread(
             () => SelectAction.Execute(element, request.ItemText, request.ItemIndex), request.Timeout);
         if (!selectDone)
-            return StillHandlingResponse(message.Id, $"The selection on ref={request.Ref}", request.Timeout);
+            return StillHandlingResponse(message.Id, $"The selection on ref={elementRef}", request.Timeout);
         if (result.Error is { } reason)
             return IpcSerializer.CreateError(message.Id, reason);
 
         var response = new ActionResponse
         {
             Success = true,
-            Message = await SettleAsync($"Selected item in ref={request.Ref}", request.Timeout)
+            Message = await SettleAsync($"Selected item in ref={elementRef}", request.Timeout)
         };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
@@ -681,23 +774,27 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleToggle(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<ToggleRequest>(message.Payload!.Value);
-        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+
+        var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+        if (targetError is not null)
+            return targetError;
+        if (!TryResolveUiElement(elementRef, message.Id, out var element, out var error))
             return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, request.Ref, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout);
 
         var (toggleDone, result) = await RunOnUiThread(() => ToggleAction.Execute(element), request.Timeout);
         if (!toggleDone)
-            return StillHandlingResponse(message.Id, $"The toggle on ref={request.Ref}", request.Timeout);
+            return StillHandlingResponse(message.Id, $"The toggle on ref={elementRef}", request.Timeout);
         if (result.Error is { } reason)
             return IpcSerializer.CreateError(message.Id, reason);
 
         var response = new ActionResponse
         {
             Success = true,
-            Message = await SettleAsync($"Toggled ref={request.Ref}", request.Timeout)
+            Message = await SettleAsync($"Toggled ref={elementRef}", request.Timeout)
         };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
@@ -708,17 +805,21 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleExpand(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<ExpandRequest>(message.Payload!.Value);
-        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+
+        var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+        if (targetError is not null)
+            return targetError;
+        if (!TryResolveUiElement(elementRef, message.Id, out var element, out var error))
             return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, request.Ref, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout);
 
         var (expandDone, result) = await RunOnUiThread(
             () => ExpandAction.Execute(element, request.Expand), request.Timeout);
         if (!expandDone)
-            return StillHandlingResponse(message.Id, $"The expand/collapse on ref={request.Ref}", request.Timeout);
+            return StillHandlingResponse(message.Id, $"The expand/collapse on ref={elementRef}", request.Timeout);
         if (result.Error is { } reason)
             return IpcSerializer.CreateError(message.Id, reason);
 
@@ -726,7 +827,7 @@ public sealed class IpcServer
         var response = new ActionResponse
         {
             Success = true,
-            Message = await SettleAsync($"{action} ref={request.Ref}", request.Timeout)
+            Message = await SettleAsync($"{action} ref={elementRef}", request.Timeout)
         };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
@@ -737,24 +838,28 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleScroll(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<ScrollRequest>(message.Payload!.Value);
-        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+
+        var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+        if (targetError is not null)
+            return targetError;
+        if (!TryResolveUiElement(elementRef, message.Id, out var element, out var error))
             return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, request.Ref, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout);
 
         var (scrollDone, result) = await RunOnUiThread(
             () => ScrollAction.Execute(element, request.HorizontalPercent, request.VerticalPercent), request.Timeout);
         if (!scrollDone)
-            return StillHandlingResponse(message.Id, $"The scroll on ref={request.Ref}", request.Timeout);
+            return StillHandlingResponse(message.Id, $"The scroll on ref={elementRef}", request.Timeout);
         if (result.Error is { } reason)
             return IpcSerializer.CreateError(message.Id, reason);
 
         var response = new ActionResponse
         {
             Success = true,
-            Message = await SettleAsync($"Scrolled ref={request.Ref}", request.Timeout)
+            Message = await SettleAsync($"Scrolled ref={elementRef}", request.Timeout)
         };
         return IpcSerializer.CreateResponse(message.Id, response);
     }
@@ -945,7 +1050,11 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleGetProperty(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<GetPropertyRequest>(message.Payload!.Value);
-        if (!TryResolveRef(request.Ref, message.Id, out var element, out var error))
+
+        var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+        if (targetError is not null)
+            return targetError;
+        if (!TryResolveRef(elementRef, message.Id, out var element, out var error))
             return error;
 
         var result = await Application.Current.Dispatcher.InvokeAsync(
@@ -953,7 +1062,7 @@ public sealed class IpcServer
         if (result.Response is not { } response)
             return IpcSerializer.CreateError(message.Id, result.Error ?? "property read failed");
 
-        response.Ref = request.Ref;
+        response.Ref = elementRef;
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
@@ -1060,7 +1169,11 @@ public sealed class IpcServer
     private async Task<IpcMessage> HandleAssert(IpcMessage message)
     {
         var request = IpcSerializer.DeserializePayload<AssertRequest>(message.Payload!.Value);
-        if (!TryResolveRef(request.Ref, message.Id, out var element, out var error))
+
+        var (elementRef, targetError) = await ResolveTargetAsync(request.Ref, request.Target, message.Id);
+        if (targetError is not null)
+            return targetError;
+        if (!TryResolveRef(elementRef, message.Id, out var element, out var error))
             return error;
 
         var read = await Application.Current.Dispatcher.InvokeAsync(

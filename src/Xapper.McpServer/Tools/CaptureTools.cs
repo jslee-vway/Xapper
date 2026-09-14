@@ -44,15 +44,11 @@ public sealed class CaptureTools
     /// <param name="ct">취소 토큰.</param>
     /// <returns>요약 텍스트와 PNG 이미지 콘텐츠.</returns>
     [McpServerTool(Name = "xapper_screenshot"), Description(
-        "Capture the window or a single element and return the image itself, so it can be viewed directly. " +
-        "The mode decides where the pixels come from and the two are not interchangeable. \"render\" (the " +
-        "default) redraws the application's own visual tree: it works while the window sits behind another " +
-        "application or has no focus, and nothing foreign can appear in it - but it draws one visual tree, so " +
-        "a dialog in its own window, a popup, a context menu or a combo-box drop-down is simply absent, and " +
-        "the response says so when other windows are open. \"screen\" reads the pixels already composited on " +
-        "the desktop, so everything a person can see is there, popups included; in exchange it shows whatever " +
-        "is on top, and the response warns when none of the application's windows is in front. Reach for " +
-        "\"screen\" whenever a dialog or menu is open, or when you need to see what the user sees.")]
+        "Capture the window or an element as an image. mode=\"render\" (default) redraws the app's visual tree: " +
+        "works while covered or unfocused but omits other windows (dialogs, popups, menus). mode=\"screen\" " +
+        "reads the desktop pixels: shows dialogs and popups but also anything on top (the response warns about other " +
+        "open windows or the app not being in front). Images cost many tokens " +
+        "- prefer xapper_get_property or xapper_assert for checks and keep maxWidth small.")]
     public async Task<IEnumerable<ContentBlock>> Screenshot(
         [Description("Element ref to capture (omit for the whole window)")] int? @ref = null,
         [Description("Shrink to at most this many pixels wide, keeping the aspect ratio (omit for full size)")] int? maxWidth = null,

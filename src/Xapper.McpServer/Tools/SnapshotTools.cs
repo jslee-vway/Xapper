@@ -21,17 +21,10 @@ public sealed class SnapshotTools
     }
 
     [McpServerTool(Name = "xapper_snapshot"), Description(
-        "Get a snapshot of the UI visual tree, assigning a ref to every element it lists except the " +
-        "synthetic Application root, which appears whenever more than one top-level window is open. Popups, " +
-        "context menus, drop-downs and even tooltips are top-level windows of their own, so the root switches " +
-        "between the window itself and that synthetic node depending on what happens to be showing - do not " +
-        "key on the root type. Calling this discards all " +
-        "refs handed out earlier, including those from xapper_find, and restarts numbering, so an old ref " +
-        "may now point at a different element. Depth is the thing to " +
-        "manage: real applications nest deeply and the default of 5 usually stops well above the content, " +
-        "while raising it grows the response exponentially and can exceed what the transport carries. " +
-        "Rather than raising maxDepth across the whole window, locate a container with xapper_find or a " +
-        "shallow snapshot, then pass its ref as rootRef to expand that subtree alone.")]
+        "Visual-tree snapshot with a ref per element. It invalidates ALL earlier refs (from find too) and " +
+        "renumbers. The root is the window, or a synthetic Application node whenever several top-level " +
+        "windows (popups, menus, tooltips) are open - do not key on it. Keep maxDepth small (default 5): " +
+        "responses grow exponentially; to go deeper, pass a container's ref as rootRef.")]
     public async Task<string> Snapshot(
         [Description("Ref to start from, taken from the previous snapshot or from xapper_find (omit for the whole window)")] int? rootRef = null,
         [Description("Max depth to traverse (default 5)")] int maxDepth = 5,

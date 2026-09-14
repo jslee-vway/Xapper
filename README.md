@@ -97,7 +97,7 @@ src/
 ├── Xapper.Protocol        IPC 메시지 계약 (net6.0~9.0-windows, WPF 무의존)
 ├── Xapper.Injector        네이티브 인젝터 (P/Invoke로 DLL 주입)
 ├── Xapper.Inspector       인젝션 라이브러리 (net6.0~9.0-windows 멀티타겟)
-└── Xapper.McpServer       MCP 서버 (stdio transport, 21개 도구)
+└── Xapper.McpServer       MCP 서버 (stdio transport, 22개 도구)
 tests/
 ├── Xapper.TestApp         샘플 WPF 로그인 폼
 └── Xapper.Tests           단위 테스트 (xUnit)
@@ -136,6 +136,7 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 - `type`은 클래스명 완전 일치, 나머지는 부분 일치, 여러 인자는 AND
 - `xapper_element_at` : 화면 좌표에 그려진 요소와 그 조상을 깊은 것부터 ref와 함께 반환. 이름도 AutomationId도 없는 컨트롤을 스크린샷에서 본 위치로 지목해 ref를 얻는 길이며, 히트테스트라 가려진 것도 정확히 판별하고 커서·포커스를 건드리지 않는다
 - 검색·스냅샷은 열린 최상위 창을 모두 순회하므로 **Popup·ContextMenu·드롭다운 안의 항목도 보인다**
+- **`target` selector**: 요소를 받는 도구(click/doubleclick/rightclick/wheel/type/key/select/toggle/expand/scroll/get_property/assert)는 `ref` 대신 `target="id=LoginButton"` · `"name=txtUser,type=TextBox"` · `"text=Log In"` 을 받는다(find 와 같은 매칭, 콤마 AND). 정확히 하나가 맞을 때만 실행하고 0개·여러 개면 후보를 담은 오류 — find 를 따로 부를 필요가 없다
 
 ### **4. UI 자동 조작**
 - 공통: 조작이 모달 대화상자(MessageBox 등)를 열면 그 창이 닫힐 때까지 기다리지 않는다 — `timeout` 뒤 "전달됐지만 앱이 아직 처리 중" 으로 응답하고, 대화상자가 떠 있는 동안에도 조회 도구는 동작한다(Win32 대화상자는 스냅샷에 안 보이므로 `xapper_screenshot mode="screen"` 으로 확인)
@@ -162,6 +163,7 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 - `mode`로 캡처 출처를 고른다. `render`(기본)는 앱의 시각 트리를 다시 그려 창이 가려져 있어도 찍히지만 별도 창·팝업·컨텍스트 메뉴·드롭다운은 담기지 않는다. `screen`은 데스크톱에 합성된 픽셀을 읽어 사람이 보는 그대로 담기지만 위를 덮은 창도 함께 찍힌다
 - 담지 못한 것이 있으면 응답이 그 사실을 알린다 — `render`는 열려 있는 다른 창 개수를, `screen`은 앱의 창이 앞에 없다는 사실을
 - `xapper_assert` : 속성 값 단언 (PASS/FAIL 반환)
+- `xapper_batch` : 여러 단계를 한 호출에 순서대로 실행. 각 단계는 `{"tool": "click", ...그 도구의 인자}` 로 적고(click·doubleclick·rightclick·wheel·type·key·select·toggle·expand·scroll·find·get_property·assert), 첫 실패에서 중단하며 단계별 결과를 번호를 붙여 단일 도구와 같은 형식으로 돌려준다
 
 <br/>
 
@@ -289,6 +291,7 @@ AI 에이전트가 자동으로 수행하는 흐름:
 | `xapper_get_bindings` | 바인딩 조회 | `ref` |
 | `xapper_screenshot` | 스크린샷 (이미지 반환) | `ref`, `maxWidth`, `savePath`, `mode` (모두 선택) |
 | `xapper_assert` | 값 단언 | `ref`, `propertyName`, `operator`, `expected` |
+| `xapper_batch` | 여러 단계를 한 호출에 (첫 실패에서 중단, 단계별 결과) | `steps` (`{"tool", ...}` 배열, 최대 50) |
 
 <br/>
 
