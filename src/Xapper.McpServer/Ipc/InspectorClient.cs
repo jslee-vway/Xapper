@@ -126,7 +126,7 @@ public sealed class InspectorClient : IAsyncDisposable
     }
 
     /// <summary>UI 요소에 텍스트를 입력합니다.</summary>
-    public async Task<IpcMessage> TypeAsync(int @ref, string text, bool clear = true, int timeout = 5000, CancellationToken ct = default)
+    public async Task<IpcMessage> TypeAsync(int? @ref, string text, bool clear = true, int timeout = 5000, CancellationToken ct = default)
     {
         var payload = new { @ref, text, clear, timeout };
         var request = IpcSerializer.CreateRequest("type", payload);

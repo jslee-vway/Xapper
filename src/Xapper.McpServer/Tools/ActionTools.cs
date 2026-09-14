@@ -163,10 +163,20 @@ public sealed class ActionTools
         return result.Success ? result.Message ?? "Wheel succeeded" : $"Failed: {result.Error}";
     }
 
-    [McpServerTool(Name = "xapper_type"), Description("Type text into a TextBox or editable element by ref")]
+    [McpServerTool(Name = "xapper_type"), Description(
+        "Enter text into an editable element by ref - the tool to use for any text longer than one key. Sets the " +
+        "value through the element's accessibility Value pattern or TextBox.Text when it has one; otherwise it " +
+        "focuses the element and types the text as real keystrokes inside the target process, so it also works " +
+        "on editors without a value pattern (RichTextBox, grid cell editors, DevExpress text editors). Omit ref to " +
+        "type into whatever currently has keyboard focus - the way to fill an inline editor you just opened with F2 " +
+        "or a double-click, which has no ref until the next snapshot. The text is always entered literally. Do NOT " +
+        "spell a word out with one xapper_key call per letter - one xapper_type call enters the whole string. Use " +
+        "xapper_key only for named keys (Enter, Tab, F2, arrows) and key chords. The keystroke path cannot tell " +
+        "whether the element accepted the characters (a focused button just ignores them), so read the value back " +
+        "with xapper_get_property when it matters.")]
     public async Task<string> Type(
-        [Description("Element ref from last snapshot")] int @ref,
         [Description("Text to type into the element")] string text,
+        [Description("Element ref from last snapshot. Omit to type into the element that currently has keyboard focus")] int? @ref = null,
         [Description("If true, clears existing text first (default true)")] bool clear = true,
         [Description("Timeout in ms (default 5000)")] int timeout = 5000,
         CancellationToken ct = default)
@@ -187,20 +197,22 @@ public sealed class ActionTools
         "person is doing - this routes the key to the application's own Keyboard.FocusedElement, so it works " +
         "no matter which window is in front and the person can keep working. Use it for keys the mouse cannot " +
         "express: F2 to open a grid cell editor, Enter to commit, Escape to cancel, Tab to move focus, arrow " +
-        "keys to navigate, and single characters to type. This sends exactly ONE keystroke per call - a single " +
-        "character or one named key; to type a whole string use xapper_type instead (a multi-character value " +
-        "here is rejected). key is a WPF Key name (\"F2\", \"Enter\", \"Escape\", " +
-        "\"Tab\", \"Down\") or a single printable character (\"a\", \"7\") which is typed as text. Pass ref to " +
+        "keys to navigate. key is a WPF Key name (\"F2\", \"Enter\", \"Escape\", \"Tab\", \"Down\"), a single " +
+        "printable character (\"a\", \"7\"), or a longer string such as \"qwerty\" which is typed as one " +
+        "keystroke per character in this single call - never issue one call per letter. A string that happens to " +
+        "be a Key name is sent as that key, not typed: this includes common words (Enter, Tab, Space, Home, End, " +
+        "Help, Print, Select, Cancel, Clear, Insert, Delete, Pause, Play, Zoom, Up, Down, Left, Right, Add, Divide, " +
+        "Scroll, Sleep) and short codes like \"D1\" or \"F5\". To enter any text literally - including into an " +
+        "editor you just opened - use xapper_type (omit its ref to target the focused editor). Pass ref to " +
         "focus that element first; omit it to send to whatever currently has focus (for example the cell you " +
         "just clicked). The response names the key and the element that holds focus afterwards. " +
         "Modifiers ARE supported: pass modifiers=\"Ctrl\" for Ctrl+Z, \"Ctrl+Shift\" for combos. They are held from " +
         "inside the target process (no real key is pressed and nothing leaks to other windows). If that in-process " +
         "path cannot be set up in this process the call returns an error rather than pressing real keys. A " +
         "character with Ctrl or Alt is sent as a key chord only, not typed (Ctrl+a selects all, it does not insert " +
-        "'a'). This is also how xapper_type differs: type assigns a value; xapper_key drives the real key " +
-        "pipeline (needed for editors that only open on a key like F2).")]
+        "'a'). xapper_key is for keys and chords; xapper_type is for text.")]
     public async Task<string> Key(
-        [Description("Key to send: a WPF Key name (F2, Enter, Escape, Tab, Down) or a single printable character")] string key,
+        [Description("Key to send: a WPF Key name (F2, Enter, Escape, Tab, Down), a single printable character, or a string to type character by character in this one call")] string key,
         [Description(ModifiersDescription)] string? modifiers = null,
         [Description("Element ref to focus first (omit to send to the currently focused element)")] int? @ref = null,
         [Description("Timeout in ms (default 5000)")] int timeout = 5000,

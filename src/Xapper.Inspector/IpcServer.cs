@@ -537,12 +537,27 @@ public sealed class IpcServer
     {
         var request = IpcSerializer.DeserializePayload<TypeTextRequest>(message.Payload!.Value);
 
-        if (!TryResolveUiElement(request.Ref, message.Id, out var element, out var error))
+        // ref 가 없으면 현재 포커스 요소에 키 입력으로 타이핑한다(F2 로 연 인라인 편집기처럼 스냅샷에 없는 편집기).
+        if (request.Ref is not { } elementRef)
+        {
+            var focusedResult = await Application.Current.Dispatcher.InvokeAsync(
+                () => TypeAction.ExecuteOnFocused(request.Text, request.Clear));
+            if (focusedResult.Error is { } focusedReason)
+                return IpcSerializer.CreateError(message.Id, focusedReason);
+
+            return IpcSerializer.CreateResponse(message.Id, new ActionResponse
+            {
+                Success = true,
+                Message = await SettleAsync("Typed into the focused element as keystrokes", request.Timeout)
+            });
+        }
+
+        if (!TryResolveUiElement(elementRef, message.Id, out var element, out var error))
             return error;
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, request.Ref, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout);
 
         var result = await Application.Current.Dispatcher.InvokeAsync(
             () => TypeAction.Execute(element, request.Text, request.Clear));
@@ -552,7 +567,7 @@ public sealed class IpcServer
         var response = new ActionResponse
         {
             Success = true,
-            Message = await SettleAsync($"Typed into ref={request.Ref}", request.Timeout)
+            Message = await SettleAsync($"Typed into ref={elementRef}", request.Timeout)
         };
         return IpcSerializer.CreateResponse(message.Id, response);
     }

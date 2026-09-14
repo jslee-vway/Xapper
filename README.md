@@ -144,8 +144,8 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 - `xapper_doubleclick` : 좌표 지점 더블클릭. 더블클릭은 특정 위치에서 일어나는 제스처라 x/y 필수(그리드 행/셀을 더블클릭해 편집기 열기 등). 클릭과 같은 후킹 경로(커서 미이동)를 쓰고, 두 번의 누름을 시스템 더블클릭 시간 안에 붙여 보내 한 번의 더블클릭으로 인식시킨다 — xapper_click 을 두 번 부르는 것으로는 보장되지 않는다
 - `xapper_rightclick` : 좌표 지점 우클릭(컨텍스트 메뉴). 항상 좌표 제스처, 기본은 요소 중앙. 후킹 경로(커서 미이동)이고 폴백만 실제 입력
 - `xapper_wheel` : 좌표 지점에서 마우스 휠. `xapper_scroll` 이 ScrollViewer 오프셋을 직접 바꾸는 것과 달리 실제 휠 제스처라 Ctrl+휠 줌·커스텀 MouseWheel 핸들러를 건드린다. `notches` 양수=위, 음수=아래(±100)
-- `xapper_type` : TextBox에 텍스트 입력
-- `xapper_key` : 대상 프로세스 안에서 키 입력(F2/Enter/Escape/Tab/화살표/한 글자). 전경 창과 무관하게 대상 앱의 키보드 포커스 요소로 라우팅하므로, 사용자가 앞 창에서 딴 일을 해도 키가 새지 않는다. ref 를 주면 먼저 그 요소에 포커스. 수식키(`modifiers`: Ctrl/Shift/Alt, `Ctrl+Shift` 조합)를 지원 — 대상 프로세스 안에서 GetKeyState 를 스푸프해 WPF 가 눌린 것으로 보게 하며(Ctrl+Z 등), 후크를 걸 수 없으면 오류로 안내한다. 편집기가 키(F2)로만 열리는 컨트롤에 쓴다
+- `xapper_type` : 텍스트 입력. 접근성 Value 패턴이나 `TextBox.Text` 로 값을 넣고, 둘 다 없는 편집기(RichTextBox·그리드 셀 편집기·DevExpress 편집기)에는 포커스를 준 뒤 실제 키 입력으로 타이핑한다. `ref` 를 생략하면 현재 키보드 포커스 요소에 키 입력으로 타이핑한다(F2·더블클릭으로 연 인라인 편집기처럼 스냅샷에 아직 없는 편집기). 글자 그대로 들어가며, 여러 글자는 항상 이 도구로(글자마다 `xapper_key` 를 부르지 않는다)
+- `xapper_key` : 대상 프로세스 안에서 키 입력(F2/Enter/Escape/Tab/화살표/한 글자, 또는 `"qwerty"` 같은 문자열을 한 호출에 글자별 키 입력으로). 전경 창과 무관하게 대상 앱의 키보드 포커스 요소로 라우팅하므로, 사용자가 앞 창에서 딴 일을 해도 키가 새지 않는다. ref 를 주면 먼저 그 요소에 포커스. 수식키(`modifiers`: Ctrl/Shift/Alt, `Ctrl+Shift` 조합)를 지원 — 대상 프로세스 안에서 GetKeyState 를 스푸프해 WPF 가 눌린 것으로 보게 하며(Ctrl+Z 등), 후크를 걸 수 없으면 오류로 안내한다. 편집기가 키(F2)로만 열리는 컨트롤에 쓴다
 - `xapper_select` : ComboBox/ListBox 항목 선택
 - `xapper_toggle` : CheckBox/ToggleButton 토글
 - `xapper_expand` : TreeViewItem/Expander 펼치기/접기
@@ -277,7 +277,7 @@ AI 에이전트가 자동으로 수행하는 흐름:
 | `xapper_doubleclick` | 더블클릭 | `ref`, `x`, `y` (x/y 필수), `modifiers`(선택) |
 | `xapper_rightclick` | 우클릭 | `ref`, `x`, `y`, `modifiers` (x/y/modifiers 선택) |
 | `xapper_wheel` | 마우스 휠 | `ref`, `notches`, `x`, `y`, `modifiers` (x/y/modifiers 선택) |
-| `xapper_type` | 텍스트 입력 | `ref`, `text` |
+| `xapper_type` | 텍스트 입력 | `text`, `ref`(선택, 없으면 포커스 요소), `clear`(선택) |
 | `xapper_key` | 키 입력 | `key`, `modifiers`(선택), `ref`(선택) |
 | `xapper_select` | 항목 선택 | `ref`, `item` |
 | `xapper_toggle` | 토글 | `ref` |

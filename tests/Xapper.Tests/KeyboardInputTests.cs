@@ -58,28 +58,112 @@ public class KeyboardInputTests
     }
 
     [Fact]
-    public void Send_WithAnUnknownKey_ReturnsErrorWithoutThrowing()
+    public void Send_TypesAWholeStringAsSequentialKeystrokes()
     {
-        OffscreenTextBoxes.Run(_ =>
+        OffscreenTextBoxes.Run(box =>
         {
-            var (error, _, _) = KeyboardInput.Send(null, "NotAKey", ModifierKeys.None);
+            var downs = new List<Key>();
+            box.PreviewKeyDown += (_, e) => downs.Add(e.Key);
 
-            Assert.NotNull(error);
-            Assert.Contains("Unknown key", error);
+            var (error, focused, _) = KeyboardInput.Send(null, "qwerty", ModifierKeys.None);
+
+            Assert.Null(error);
+            Assert.Equal("qwerty", box.Text);
+            Assert.Equal(new[] { Key.Q, Key.W, Key.E, Key.R, Key.T, Key.Y }, downs);
+            Assert.Equal(nameof(TextBox), focused);
         });
     }
 
     [Fact]
-    public void Send_WithANumericKeyName_ReturnsErrorWithoutThrowing()
+    public void Send_AWordThatIsAKeyName_SendsTheKeyNotTheLetters()
     {
-        OffscreenTextBoxes.Run(_ =>
+        OffscreenTextBoxes.Run(box =>
         {
-            // "999" 는 Enum.TryParse<Key> 를 (Key)999 로 통과시키지만 정의되지 않은 값이라,
-            // KeyEventArgs 생성자가 예외를 던진다(결함 2). 던지지 말고 오류로 돌려줘야 한다.
-            var (error, _, _) = KeyboardInput.Send(null, "999", ModifierKeys.None);
+            var downs = new List<Key>();
+            box.PreviewKeyDown += (_, e) => downs.Add(e.Key);
+
+            var (error, _, _) = KeyboardInput.Send(null, "Enter", ModifierKeys.None);
+
+            Assert.Null(error);
+            Assert.Equal(new[] { Key.Enter }, downs);
+            Assert.Equal("", box.Text);
+        });
+    }
+
+    [Fact]
+    public void Send_AStringWithModifiers_ReturnsErrorWithoutThrowing()
+    {
+        OffscreenTextBoxes.Run(box =>
+        {
+            var (error, _, _) = KeyboardInput.Send(null, "abc", ModifierKeys.Control);
+
+            Assert.NotNull(error);
+            Assert.Contains("single key", error);
+            Assert.Equal("", box.Text);
+        });
+    }
+
+    [Fact]
+    public void TypeText_TypesLiterallyEvenWhenTheWordIsAKeyName()
+    {
+        OffscreenTextBoxes.Run(box =>
+        {
+            var (error, focused) = KeyboardInput.TypeText(null, "Enter");
+
+            Assert.Null(error);
+            Assert.Equal("Enter", box.Text);
+            Assert.Equal(nameof(TextBox), focused);
+        });
+    }
+
+    [Fact]
+    public void TypeText_WithControlCharacters_ReturnsErrorWithoutThrowing()
+    {
+        OffscreenTextBoxes.Run(box =>
+        {
+            var (error, _) = KeyboardInput.TypeText(null, "a\tb");
+
+            Assert.NotNull(error);
+            Assert.Equal("", box.Text);
+        });
+    }
+
+    [Fact]
+    public void Send_AWordThatIsNotAKeyName_IsTypedLiterally()
+    {
+        OffscreenTextBoxes.Run(box =>
+        {
+            var (error, _, _) = KeyboardInput.Send(null, "NotAKey", ModifierKeys.None);
+
+            Assert.Null(error);
+            Assert.Equal("NotAKey", box.Text);
+        });
+    }
+
+    [Fact]
+    public void Send_WithControlCharacters_ReturnsErrorWithoutThrowing()
+    {
+        OffscreenTextBoxes.Run(box =>
+        {
+            var (error, _, _) = KeyboardInput.Send(null, "a" + '\n' + "b", ModifierKeys.None);
 
             Assert.NotNull(error);
             Assert.Contains("Unknown key", error);
+            Assert.Equal("", box.Text);
+        });
+    }
+
+    [Fact]
+    public void Send_WithANumericString_TypesTheDigitsInsteadOfThrowing()
+    {
+        OffscreenTextBoxes.Run(box =>
+        {
+            // "999" 는 Enum.TryParse<Key> 를 (Key)999 로 통과시키지만 정의되지 않은 값이라 KeyEventArgs 생성자가
+            // 던진다(결함 2). Key 로 해석하지 않고 숫자 세 글자로 타이핑해야 한다.
+            var (error, _, _) = KeyboardInput.Send(null, "999", ModifierKeys.None);
+
+            Assert.Null(error);
+            Assert.Equal("999", box.Text);
         });
     }
 

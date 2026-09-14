@@ -5,8 +5,8 @@ namespace Xapper.Protocol.Messages.Requests;
 /// </summary>
 public sealed class TypeTextRequest
 {
-    /// <summary>텍스트를 입력할 대상 요소의 참조 번호.</summary>
-    public int Ref { get; set; }
+    /// <summary>텍스트를 입력할 대상 요소의 참조 번호. null 이면 현재 키보드 포커스 요소에 실제 키 입력으로 타이핑한다(F2 로 연 인라인 편집기 등).</summary>
+    public int? Ref { get; set; }
 
     /// <summary>입력할 텍스트 문자열.</summary>
     public required string Text { get; set; }

@@ -32,18 +32,55 @@ internal static class KeyboardInput
     /// 키를 주입합니다. 반드시 대상 UI 스레드에서 호출해야 한다.
     /// </summary>
     /// <param name="refElement">먼저 포커스를 줄 요소. null 이면 현재 포커스 요소에 보낸다.</param>
-    /// <param name="keyName">보낼 키(WPF Key 이름 또는 한 글자).</param>
+    /// <param name="keyName">보낼 키. WPF Key 이름("Enter")이나 한 글자, 또는 두 글자 이상의 문자열 — 문자열이면 글자마다
+    /// 실제 키 이벤트를 순서대로 넣어 한 호출로 타이핑한다(수식키와는 함께 쓸 수 없다).</param>
     /// <param name="modifiers">함께 눌린 것으로 볼 수식키.</param>
     /// <returns>실패 사유(없으면 null), 주입 후 포커스 요소의 타입 이름, 수식키를 어떻게 걸었는지("" 이면 수식키 없음).</returns>
     public static (string? Error, string Focused, string ModifierPath) Send(
         DependencyObject? refElement, string keyName, ModifierKeys modifiers)
     {
-        if (!TryResolveKey(keyName, out var key, out var text))
+        if (!TryResolveStrokes(keyName, out var strokes))
             return (
-                $"Unknown key \"{keyName}\". Use a WPF Key name (F2, Enter, Escape, Tab, Down, ...) or a single " +
-                "printable character to type.",
+                $"Unknown key \"{keyName}\". Use a WPF Key name (F2, Enter, Escape, Tab, Down, ...), a single " +
+                "printable character, or a string of printable characters to type.",
                 "", "");
 
+        if (strokes.Count > 1 && modifiers != ModifierKeys.None)
+            return (
+                "Modifiers apply to a single key only. Send the string without modifiers, or send one key with them.",
+                "", "");
+
+        return Inject(refElement, strokes, modifiers);
+    }
+
+    /// <summary>
+    /// 문자열을 글자 그대로 타이핑합니다. <see cref="Send"/> 와 달리 Key 이름으로 해석하지 않으므로 "Enter" 도 다섯 글자로
+    /// 들어간다. 값 대입이 안 되는 편집기에 type 도구가 쓰는 경로다. 반드시 대상 UI 스레드에서 호출해야 한다.
+    /// </summary>
+    /// <param name="refElement">먼저 포커스를 줄 요소. null 이면 현재 포커스 요소에 보낸다.</param>
+    /// <param name="text">타이핑할 문자열. 제어 문자는 넣을 수 없다.</param>
+    /// <returns>실패 사유(없으면 null)와 주입 후 포커스 요소의 타입 이름.</returns>
+    public static (string? Error, string Focused) TypeText(DependencyObject? refElement, string text)
+    {
+        if (text.Any(char.IsControl))
+            return ("Text to type must not contain control characters; send named keys (Enter, Tab) with the key tool.", "");
+
+        var strokes = new List<(Key Key, string? Text)>();
+        foreach (var ch in text)
+            strokes.Add((KeyFromChar(ch), ch.ToString()));
+
+        var (error, focused, _) = Inject(refElement, strokes, ModifierKeys.None);
+        return (error, focused);
+    }
+
+    #endregion
+
+    #region Private Methods
+
+    /// <summary>포커스를 정하고 키 입력 순서를 주입하는 공통 경로. 빈 순서면 포커스만 옮기고 끝난다.</summary>
+    private static (string? Error, string Focused, string ModifierPath) Inject(
+        DependencyObject? refElement, List<(Key Key, string? Text)> strokes, ModifierKeys modifiers)
+    {
         // 후크가 없으면 키를 넣기 전에(포커스를 옮기기 전에) 알린다 — 오류 경로에 부작용을 남기지 않는다.
         if (modifiers != ModifierKeys.None && !InputSpoof.EnsureInstalled())
             return (
@@ -86,14 +123,17 @@ internal static class KeyboardInput
 
         try
         {
-            if (key != Key.None)
-                RaiseKey(source, key, Keyboard.PreviewKeyDownEvent);
+            foreach (var (key, text) in strokes)
+            {
+                if (key != Key.None)
+                    RaiseKey(source, key, Keyboard.PreviewKeyDownEvent);
 
-            if (text is not null && !suppressText)
-                RaiseText(target, text);
+                if (text is not null && !suppressText)
+                    RaiseText(target, text);
 
-            if (key != Key.None)
-                RaiseKey(source, key, Keyboard.PreviewKeyUpEvent);
+                if (key != Key.None)
+                    RaiseKey(source, key, Keyboard.PreviewKeyUpEvent);
+            }
         }
         finally
         {
@@ -103,10 +143,6 @@ internal static class KeyboardInput
 
         return (null, FocusedTypeName(), modifierPath);
     }
-
-    #endregion
-
-    #region Private Methods
 
     /// <summary>키 이벤트를 대상에 넣습니다. Preview 이벤트만 넣으면 WPF 가 본 이벤트로 승격한다.</summary>
     private static void RaiseKey(PresentationSource source, Key key, RoutedEvent previewEvent)
@@ -124,6 +160,29 @@ internal static class KeyboardInput
             {
                 RoutedEvent = TextCompositionManager.TextInputEvent
             });
+    }
+
+    /// <summary>
+    /// 입력 문자열을 키 입력 순서로 해석합니다. Key 이름이나 한 글자는 키 하나, 그 외 인쇄 문자로만 된 문자열은
+    /// 글자마다 키 하나(글자 + 대응 Key). "Enter" 처럼 Key 이름과 같은 단어는 키로 해석되므로 그런 단어를 글자 그대로
+    /// 넣으려면 type 도구를 쓴다.
+    /// </summary>
+    private static bool TryResolveStrokes(string keyName, out List<(Key Key, string? Text)> strokes)
+    {
+        strokes = new List<(Key, string?)>();
+
+        if (TryResolveKey(keyName, out var key, out var text))
+        {
+            strokes.Add((key, text));
+            return true;
+        }
+
+        if (keyName.Length < 2 || keyName.Any(char.IsControl))
+            return false;
+
+        foreach (var ch in keyName)
+            strokes.Add((KeyFromChar(ch), ch.ToString()));
+        return true;
     }
 
     /// <summary>
