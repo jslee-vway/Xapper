@@ -176,6 +176,19 @@ public sealed class IpcServer
     }
 
     /// <summary>
+    /// 후킹 제스처가 정체된(스푸프는 이미 꺼짐) 뒤, 앱 핸들러가 요청의 제한 시간 안에 끝나는지 기다립니다. 워치독의 250 ms 는
+    /// 사람의 마우스를 보호하는 시간이지 앱에 허용하는 처리 시간이 아니다 — 수백 ms 걸리는 평범한 핸들러를 "아직 처리 중"
+    /// 으로 돌려주면 배치가 거기서 멈춘다. 끝나지 않으면(모달 대화상자) false.
+    /// </summary>
+    private static Task<bool> StalledHandlerFinishedAsync(int timeoutMs)
+    {
+        var application = Application.Current;
+        if (application is null)
+            return Task.FromResult(true);
+        return SyntheticMouse.WaitUntilHandledAsync(application.Dispatcher, TimeSpan.FromMilliseconds(timeoutMs));
+    }
+
+    /// <summary>
     /// 조작은 전달됐지만 앱이 제한 시간 안에 처리를 끝내지 못했을 때의 응답을 만듭니다. 대개 핸들러가 MessageBox 같은
     /// 모달 대화상자를 연 경우다 — 그 대화상자는 Win32 창이라 스냅샷에 안 보이고, 닫힐 때까지 호출자가 매달리면 안 되므로
     /// 성공(전달됨)으로 돌려주되 상황을 알린다.
@@ -187,9 +200,9 @@ public sealed class IpcServer
             Success = true,
             Pending = true,
             Message = $"{what} was delivered, but the application has not finished handling it after {timeoutMs} ms. " +
-                      "It is most likely showing a modal dialog (a MessageBox is a Win32 window and does not appear in " +
-                      "snapshots - use xapper_screenshot with mode=\"screen\" to see it). The person has to dismiss it; " +
-                      "until then other calls may report the application as busy, and this action's own outcome is unknown."
+                      "Either it is still busy with it, or the action opened a modal dialog (a MessageBox is a Win32 window and does " +
+                      "not appear in snapshots - use xapper_screenshot with mode=\"screen\" to see it; the person has to dismiss " +
+                      "it). Re-read the state before relying on this action's outcome."
         });
     }
 
@@ -505,7 +518,9 @@ public sealed class IpcServer
             var hooked = request.DoubleClick
                 ? SyntheticMouse.TryDoubleClick(target.Hwnd, target.Screen, modifiers)
                 : SyntheticMouse.TryClick(target.Hwnd, target.Screen, modifiers);
-            if (hooked)
+            if (hooked == GestureResult.Stalled && !await StalledHandlerFinishedAsync(request.Timeout))
+                return StillHandlingResponse(message.Id, $"The click on ref={elementRef}", request.Timeout);
+            if (hooked != GestureResult.Unavailable)
             {
                 var hookVerb = request.DoubleClick ? "Double-clicked" : "Clicked";
                 var hookText = $"{hookVerb}{withMods} ref={elementRef} at ({request.X:F2},{request.Y:F2}) " +
@@ -544,16 +559,19 @@ public sealed class IpcServer
     /// <param name="hooked">후킹 경로 제스처(창 핸들, 스크린 좌표 → 수행 여부).</param>
     /// <param name="real">실제 입력 제스처(스크린 좌표).</param>
     /// <param name="noun">경고 문구에 쓸 제스처 이름("click", "wheel").</param>
-    /// <returns>수행 경로 설명과, 필요하면 경고.</returns>
-    private static async Task<(string How, string? Warning)> RunPointGesture(
+    /// <returns>수행 경로 설명, 필요하면 경고, 그리고 후킹 제스처가 정체됐는지(호출자가 핸들러 종료를 더 기다린다).</returns>
+    private static async Task<(string How, string? Warning, bool Stalled)> RunPointGesture(
         UIElement element, double rx, double ry, ModifierKeys modifiers,
-        Func<IntPtr, Point, bool> hooked, Action<Point> real, string noun)
+        Func<IntPtr, Point, GestureResult> hooked, Action<Point> real, string noun)
     {
         var target = await Application.Current.Dispatcher.InvokeAsync(
             () => (Hwnd: HwndHandleOf(element), Screen: MouseInput.ToScreenPoint(element, rx, ry)));
 
-        if (hooked(target.Hwnd, target.Screen))
-            return ("synthetic mouse input (no cursor movement)", null);
+        var result = hooked(target.Hwnd, target.Screen);
+        if (result == GestureResult.Stalled)
+            return ("synthetic mouse input (no cursor movement)", null, true);
+        if (result == GestureResult.Delivered)
+            return ("synthetic mouse input (no cursor movement)", null, false);
 
         var activated = await Application.Current.Dispatcher.InvokeAsync(() => MouseInput.BringToForeground(element));
         RealModifierKeys.Press(modifiers);
@@ -569,7 +587,7 @@ public sealed class IpcServer
         var warning = activated
             ? null
             : $"the target window could not be brought to the foreground, so the {noun} may not have reached the control. Bring the window to the front and retry.";
-        return ("real mouse input", warning);
+        return ("real mouse input", warning, false);
     }
 
     /// <summary>
@@ -598,10 +616,12 @@ public sealed class IpcServer
         var ry = request.Y ?? 0.5;
 
         var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
-        var (how, warning) = await RunPointGesture(element, rx, ry, modifiers,
+        var (how, warning, stalled) = await RunPointGesture(element, rx, ry, modifiers,
             (hwnd, screen) => SyntheticMouse.TryRightClick(hwnd, screen, modifiers),
             screen => MouseInput.RightClickAt(screen),
             "click");
+        if (stalled && !await StalledHandlerFinishedAsync(request.Timeout))
+            return StillHandlingResponse(message.Id, $"The right-click on ref={elementRef}", request.Timeout);
 
         var text = $"Right-clicked{withMods} ref={elementRef} at ({rx:F2},{ry:F2}) via {how}";
         if (warning is not null)
@@ -644,10 +664,12 @@ public sealed class IpcServer
         var ry = request.Y ?? 0.5;
 
         var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
-        var (how, warning) = await RunPointGesture(element, rx, ry, modifiers,
+        var (how, warning, stalled) = await RunPointGesture(element, rx, ry, modifiers,
             (hwnd, screen) => SyntheticMouse.TryWheel(hwnd, screen, request.Notches, modifiers),
             screen => MouseInput.WheelAt(screen, request.Notches),
             "wheel");
+        if (stalled && !await StalledHandlerFinishedAsync(request.Timeout))
+            return StillHandlingResponse(message.Id, $"The wheel on ref={elementRef}", request.Timeout);
 
         var direction = request.Notches > 0 ? "up" : "down";
         var text = $"Wheeled {Math.Abs(request.Notches)} notch(es) {direction}{withMods} on ref={elementRef} at ({rx:F2},{ry:F2}) via {how}";
@@ -966,10 +988,20 @@ public sealed class IpcServer
             if (modifiers != ModifierKeys.None)
                 warning = "modifiers do not apply to a thumb drag (the control's own drag events were used) and were ignored.";
         }
-        else if (SyntheticMouse.TryDrag(outcome.Hwnd, outcome.Start, outcome.End, modifiers))
+        else if (SyntheticMouse.TryDrag(outcome.Hwnd, outcome.Start, outcome.End, modifiers) is var dragResult
+                 && dragResult != GestureResult.Unavailable)
         {
             // 후킹 경로: 커서를 옮기지 않고 대상 창에 드래그를 보낸다.
             how = "synthetic mouse input (no cursor movement)";
+            if (dragResult == GestureResult.Stalled)
+            {
+                if (!await StalledHandlerFinishedAsync(request.Timeout))
+                    return StillHandlingResponse(message.Id, "The drag", request.Timeout);
+                // 스푸프가 꺼진 뒤 보낸 이동·뗌은 버튼이 안 눌린 것으로 보였으므로 드래그가 일찍 끝났을 수 있다.
+                warning = $"the app took longer than {SyntheticMouse.StallTimeoutMs} ms to handle the button-down, so the " +
+                          "synthetic button state was released before the moves and the drag may have ended early. " +
+                          "Re-read the state to check the result.";
+            }
         }
         else
         {

@@ -88,7 +88,8 @@ public sealed class InteractionTools
         "named; prefer xapper_scroll for sliders and scrollbars. Otherwise it runs in-process and " +
         "cursor-free; real-input fallback only if unavailable or the app's own window covers the start point " +
         "(the response says which, with a WARNING if the window could not be activated). modifiers for a " +
-        "Ctrl- or Shift-drag.")]
+        "Ctrl- or Shift-drag. A source that starts OLE drag-and-drop (DragDrop.DoDragDrop) follows the real " +
+        "cursor and cannot finish cursor-free; the response then says the app is still handling the drag.")]
     public async Task<string> Drag(
         [Description("Source element ref from last snapshot. Omit to treat sourceX/sourceY as absolute screen pixels")] int? sourceRef = null,
         [Description("Start X: 0-1 within the source element (default 0.5), or screen X without sourceRef")] double? sourceX = null,

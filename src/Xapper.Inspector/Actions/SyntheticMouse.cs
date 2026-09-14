@@ -1,14 +1,28 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace Xapper.Inspector.Actions;
+
+/// <summary>후킹 경로 제스처의 결과.</summary>
+internal enum GestureResult
+{
+    /// <summary>후크를 쓸 수 없거나 같은 앱의 창이 덮고 있어 보내지 않았다 — 호출자가 실제 입력으로 폴백한다.</summary>
+    Unavailable,
+
+    /// <summary>모든 메시지를 보냈고 앱이 제때 처리했다.</summary>
+    Delivered,
+
+    /// <summary>메시지는 보냈지만 앱이 제한 시간 안에 처리하지 못해 스푸프를 일찍 껐다(느린 핸들러 또는 모달 대화상자). 결과는 아직 알 수 없다.</summary>
+    Stalled,
+}
 
 /// <summary>
 /// 실제 커서를 옮기지 않고 대상 창에 마우스 제스처(클릭·더블클릭·우클릭·휠·드래그)를 전달하는 정적 클래스.
 /// 입력 상태(<c>GetKeyState</c>/<c>GetCursorPos</c> 등)는 <see cref="InputSpoof"/> 가 스푸프하고, 여기서는
 /// 그 스푸프를 켠 채 창에 WM 마우스 메시지를 보낸다. 커서는 한 픽셀도 움직이지 않고, 다른 프로세스의
-/// 포커스도 뺏지 않는다. 후크를 설치할 수 없으면 false 를 돌려 호출자가 실제 입력으로 폴백한다.
+/// 포커스도 뺏지 않는다. 후크를 설치할 수 없으면 Unavailable 을 돌려 호출자가 실제 입력으로 폴백한다.
 /// </summary>
 internal static class SyntheticMouse
 {
@@ -34,8 +48,26 @@ internal static class SyntheticMouse
     /// <summary>드래그를 나누어 보낼 이동 횟수.</summary>
     private const int DragSteps = 8;
 
-    /// <summary>WM 메시지 하나가 대상 UI 스레드에서 처리되기를 기다리는 한도 (밀리초).</summary>
-    private const uint SendTimeoutMs = 3000;
+    /// <summary>
+    /// WM 메시지 하나가 대상 UI 스레드에서 처리되기를 기다리는 한도 (밀리초). 이 안에 끝나지 않으면 앱 핸들러가 느리거나
+    /// 모달 대화상자를 연 것이다 — 그때는 기다리지 않고 <b>스푸프를 즉시 끈다</b>. 스푸프가 켜진 동안 사람의 진짜 마우스가
+    /// 그 앱에서 오작동하므로(측정: 2초 핸들러 동안 프로세스 전체가 가짜 커서를 봤다) 마스킹을 이 시간으로 묶는다.
+    /// Down 은 이미 처리됐고 Up 은 자기 좌표로 라우팅되므로 클릭은 그래도 완성된다. 드래그는 다르다: 스푸프가 꺼진 뒤의
+    /// 이동·뗌은 진짜 버튼 상태(안 눌림)로 보이므로 그 시점에 드래그가 끝난다 — 응답이 그 사실을 알린다. OLE 드래그앤드롭
+    /// (<c>DragDrop.DoDragDrop</c>)은 실제 커서를 추적하므로 워치독과 무관하게 무입력으로는 완성되지 않는다(측정 확인).
+    /// 스푸프를 끄는 것과 응답을 돌려주는 것은 별개다: 호출자는 <see cref="WaitUntilHandledAsync"/> 로 핸들러가 끝나기를
+    /// 자기 제한 시간까지 더 기다린 뒤에야 "아직 처리 중" 으로 응답한다.
+    /// </summary>
+    internal const int StallTimeoutMs = 250;
+
+    /// <summary>현재 제스처에서 한 메시지라도 제한 시간 안에 처리되지 않았는지. Gate 안에서만 쓴다.</summary>
+    private static bool _stalled;
+
+    /// <summary><see cref="WaitUntilHandledAsync"/> 가 핸들러 종료를 다시 묻는 간격 (밀리초).</summary>
+    private const int HandledPollMs = 50;
+
+    /// <summary>SendMessageTimeout 이 제한 시간 때문에 0 을 돌려줬을 때의 Win32 오류 코드.</summary>
+    private const int ErrorTimeout = 1460;
 
     private static readonly object Gate = new();
 
@@ -47,8 +79,8 @@ internal static class SyntheticMouse
     /// <param name="hwnd">대상 요소가 속한 최상위 창(HwndSource) 핸들.</param>
     /// <param name="screen">클릭할 스크린 디바이스 좌표.</param>
     /// <param name="modifiers">함께 눌린 것으로 볼 수식키.</param>
-    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
-    public static bool TryClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
+    /// <returns>후킹 경로로 보냈으면 Delivered(앱이 제때 처리) 또는 Stalled(앱이 느리거나 모달을 열어 스푸프를 일찍 끔), 후크를 쓸 수 없으면 Unavailable.</returns>
+    public static GestureResult TryClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
     {
         return RunGesture(hwnd, screen, modifiers, mk =>
         {
@@ -68,8 +100,8 @@ internal static class SyntheticMouse
     /// <param name="hwnd">대상 요소가 속한 최상위 창(HwndSource) 핸들.</param>
     /// <param name="screen">더블클릭할 스크린 디바이스 좌표.</param>
     /// <param name="modifiers">함께 눌린 것으로 볼 수식키.</param>
-    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
-    public static bool TryDoubleClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
+    /// <returns>후킹 경로로 보냈으면 Delivered(앱이 제때 처리) 또는 Stalled(앱이 느리거나 모달을 열어 스푸프를 일찍 끔), 후크를 쓸 수 없으면 Unavailable.</returns>
+    public static GestureResult TryDoubleClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
     {
         return RunGesture(hwnd, screen, modifiers, mk =>
         {
@@ -95,8 +127,8 @@ internal static class SyntheticMouse
     /// <param name="hwnd">대상 요소가 속한 최상위 창(HwndSource) 핸들.</param>
     /// <param name="screen">우클릭할 스크린 디바이스 좌표.</param>
     /// <param name="modifiers">함께 눌린 것으로 볼 수식키.</param>
-    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없으면 false.</returns>
-    public static bool TryRightClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
+    /// <returns>후킹 경로로 보냈으면 Delivered 또는 Stalled, 후크를 쓸 수 없으면 Unavailable.</returns>
+    public static GestureResult TryRightClick(IntPtr hwnd, Point screen, ModifierKeys modifiers = ModifierKeys.None)
     {
         return RunGesture(hwnd, screen, modifiers, mk =>
         {
@@ -119,8 +151,8 @@ internal static class SyntheticMouse
     /// <param name="screen">휠을 굴릴 스크린 디바이스 좌표.</param>
     /// <param name="notches">굴릴 눈금 수. 양수는 위(앞), 음수는 아래(뒤).</param>
     /// <param name="modifiers">함께 눌린 것으로 볼 수식키(Ctrl+휠 줌 등).</param>
-    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없으면 false.</returns>
-    public static bool TryWheel(IntPtr hwnd, Point screen, int notches, ModifierKeys modifiers = ModifierKeys.None)
+    /// <returns>후킹 경로로 보냈으면 Delivered 또는 Stalled, 후크를 쓸 수 없으면 Unavailable.</returns>
+    public static GestureResult TryWheel(IntPtr hwnd, Point screen, int notches, ModifierKeys modifiers = ModifierKeys.None)
     {
         return RunGesture(hwnd, screen, modifiers, mk =>
         {
@@ -137,8 +169,8 @@ internal static class SyntheticMouse
     /// <param name="start">드래그 시작 스크린 디바이스 좌표.</param>
     /// <param name="end">드래그 끝 스크린 디바이스 좌표.</param>
     /// <param name="modifiers">함께 눌린 것으로 볼 수식키(Ctrl+드래그 복사 등).</param>
-    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없어 쓸 수 없으면 false.</returns>
-    public static bool TryDrag(IntPtr hwnd, Point start, Point end, ModifierKeys modifiers = ModifierKeys.None)
+    /// <returns>후킹 경로로 보냈으면 Delivered(앱이 제때 처리) 또는 Stalled(앱이 느리거나 모달을 열어 스푸프를 일찍 끔), 후크를 쓸 수 없으면 Unavailable.</returns>
+    public static GestureResult TryDrag(IntPtr hwnd, Point start, Point end, ModifierKeys modifiers = ModifierKeys.None)
     {
         return RunGesture(hwnd, start, modifiers, mk =>
         {
@@ -182,6 +214,45 @@ internal static class SyntheticMouse
         return (wParam, lParam);
     }
 
+    /// <summary>
+    /// 정체된 제스처 뒤에, UI 스레드가 우리가 보낸 메시지 처리를 끝낼 때까지 기다립니다. 느린 핸들러(수백 ms)는 끝나므로
+    /// 조작을 정상 완료로 보고할 수 있고, 모달 대화상자를 연 핸들러는 끝나지 않으므로 "아직 처리 중" 으로 남는다.
+    /// 판별은 UI 스레드에 낮은 우선순위 작업을 걸어 <c>InSendMessage</c> 를 묻는 것으로 한다 — 모달 루프 안에서도 디스패처
+    /// 작업은 돌지만, 그 안에서는 아직 크로스스레드 전송 메시지를 처리하는 중이라 true 가 나온다. 디스패처 큐만 비기를
+    /// 기다리면(<see cref="AutoWait.DispatcherDrain"/>) 모달 루프 안에서도 비므로 구분이 안 된다.
+    /// </summary>
+    /// <param name="dispatcher">대상 앱의 UI 디스패처.</param>
+    /// <param name="timeout">기다릴 최대 시간.</param>
+    /// <returns>핸들러가 끝났으면(또는 앱이 내려가 기다릴 대상이 없으면) true, 제한 시간이 지나도 처리 중이면 false.</returns>
+    internal static async Task<bool> WaitUntilHandledAsync(Dispatcher dispatcher, TimeSpan timeout)
+    {
+        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+        while (true)
+        {
+            var remaining = deadline - Environment.TickCount64;
+            if (remaining <= 0)
+                return false;
+
+            var probe = dispatcher.InvokeAsync(InSendMessage, DispatcherPriority.Background).Task;
+            if (await Task.WhenAny(probe, Task.Delay(TimeSpan.FromMilliseconds(remaining))) != probe)
+                return false;
+
+            try
+            {
+                if (!await probe)
+                    return true;
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException
+                                       && (dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished))
+            {
+                // 조작이 앱을 닫았다: 기다릴 핸들러가 남아 있지 않다.
+                return true;
+            }
+
+            await Task.Delay(HandledPollMs);
+        }
+    }
+
     #endregion
 
     #region Private Methods
@@ -194,19 +265,20 @@ internal static class SyntheticMouse
     /// <param name="screen">스푸프할 커서 시작 위치.</param>
     /// <param name="modifiers">눌린 것으로 볼 수식키.</param>
     /// <param name="body">WM 메시지를 보내는 본문. 인자는 수식키의 MK 플래그.</param>
-    /// <returns>후킹 경로로 수행했으면 true, 후크를 설치할 수 없으면 false.</returns>
-    private static bool RunGesture(IntPtr hwnd, Point screen, ModifierKeys modifiers, Action<int> body)
+    /// <returns>후킹 경로로 보냈으면 Delivered 또는 Stalled, 후크를 쓸 수 없으면 Unavailable.</returns>
+    private static GestureResult RunGesture(IntPtr hwnd, Point screen, ModifierKeys modifiers, Action<int> body)
     {
         if (hwnd == IntPtr.Zero || !InputSpoof.EnsureInstalled())
-            return false;
+            return GestureResult.Unavailable;
 
         // 같은 앱의 팝업·대화상자가 그 지점을 덮고 있으면 실제 사용자도 그 창을 누르게 된다. 스푸프로 뚫지 않고
         // 실제 입력으로 폴백해 그 창이 눌리게 한다(다른 프로세스의 창이 덮은 것은 스푸프가 처리한다).
         if (InputSpoof.IsCoveredByOwnWindow(hwnd, screen))
-            return false;
+            return GestureResult.Unavailable;
 
         lock (Gate)
         {
+            _stalled = false;
             InputSpoof.BeginMouse(hwnd, screen, modifiers);
             try
             {
@@ -216,9 +288,9 @@ internal static class SyntheticMouse
             {
                 InputSpoof.EndMouse();
             }
-        }
 
-        return true;
+            return _stalled ? GestureResult.Stalled : GestureResult.Delivered;
+        }
     }
 
     private static void Sleep() => Thread.Sleep(StepDelayMs);
@@ -248,8 +320,16 @@ internal static class SyntheticMouse
 
     private static void Send(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
     {
-        // 타임아웃이 있는 동기 전송. 대상 UI 스레드가 멎으면(ABORTIFHUNG) 무한정 기다리지 않고 넘어간다.
-        SendMessageTimeoutW(hwnd, message, wParam, lParam, SMTO_ABORTIFHUNG, SendTimeoutMs, out _);
+        // 타임아웃이 있는 동기 전송. 제한 시간 안에 처리되지 않으면(느린 핸들러·모달·멎은 앱) 메시지는 그대로 전달된
+        // 채 두고 스푸프만 즉시 끈다 — 사람의 진짜 마우스가 가짜 상태를 보는 시간을 여기서 묶는다.
+        // 0 은 제한 시간 초과뿐 아니라 창이 이미 파괴된 경우(핸들러가 자기 창을 닫음)에도 돌아온다 — 그건 정체가 아니라
+        // 조작이 끝난 것이므로 오류 코드로 구분한다.
+        var handled = SendMessageTimeoutW(hwnd, message, wParam, lParam, SMTO_ABORTIFHUNG, (uint)StallTimeoutMs, out _);
+        if (handled == IntPtr.Zero && Marshal.GetLastWin32Error() == ErrorTimeout && !_stalled)
+        {
+            _stalled = true;
+            InputSpoof.EndMouse();
+        }
     }
 
     #endregion
@@ -266,6 +346,10 @@ internal static class SyntheticMouse
     private const uint SMTO_ABORTIFHUNG = 0x0002;
 
     [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool InSendMessage();
+
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SendMessageTimeoutW(
         IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeoutMs, out IntPtr result);
 

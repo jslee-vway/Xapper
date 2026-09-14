@@ -25,6 +25,15 @@ namespace Xapper.Inspector.Actions;
 /// 스푸프가 켜진 동안 수식키 VK 는 요청된 조합만 눌림으로 답하고 나머지는 0 으로 답한다: Xapper 가 입력을 넣는
 /// 짧은 순간에 사람이 실제로 누르고 있는 키가 섞여 들어가지 않게 격리한다.
 ///
+/// 마우스 제스처의 버튼·수식키 답은 <b>UI 스레드가 우리가 보낸 메시지를 처리하는 동안</b>(<c>InSendMessage</c>)에만
+/// 한다. 앱 핸들러가 느리면 그동안 프로세스 전체에 가짜 버튼 상태를 답하게 되어 사람이 같은 앱에 넣는 진짜 클릭이
+/// 엉뚱하게 처리된다(측정: 느린 핸들러 2초 동안 프로세스가 가짜 커서를 봤다). 핸들러 안에서 모달 대화상자가 열리면
+/// 그 중첩 루프 안에서도 <c>InSendMessage</c> 는 true 로 남으므로 이 조건만으로는 부족하다 — 그 경우는
+/// <see cref="SyntheticMouse"/> 의 워치독이 메시지당 제한 시간(250ms)이 지나면 스푸프를 통째로 꺼서 막는다.
+/// 같은 스레드에서 보낸 메시지(테스트)는 <c>InSendMessage</c> 가 false 라 보낸 스레드도 함께 허용한다.
+/// 커서 위치 스푸프는 제스처 내내 유지한다 — 사이사이 WPF 가 레이아웃 뒤 <c>Synchronize</c> 로 커서를 다시 읽는데,
+/// 그때 진짜 커서를 보면 드래그 중 요소가 튀기 때문이다. 진짜 클릭은 자기 메시지의 좌표로 히트테스트되므로 영향이 없다.
+///
 /// 후크는 프로세스 수명 동안 한 번만 설치하고 플래그로만 켠다 — 꺼져 있으면 트램폴린(원함수)을 그대로 부르므로
 /// 대상 앱에 투명하다. 디투어 델리게이트와 엔진은 반드시 정적 필드로 붙들어야 한다: GC 되면 대상 앱이 후킹된
 /// 함수를 부르는 순간 CLR 이 FailFast 한다.
@@ -60,6 +69,7 @@ internal static class InputSpoof
     private static volatile bool _rDown;
     private static volatile ModifierKeys _modifiers;
     private static volatile IntPtr _hwnd;
+    private static volatile uint _senderThreadId;
 
     private static bool _installAttempted;
     private static bool _installed;
@@ -132,6 +142,7 @@ internal static class InputSpoof
     public static void BeginMouse(IntPtr hwnd, Point screen, ModifierKeys modifiers)
     {
         _hwnd = hwnd;
+        _senderThreadId = GetCurrentThreadId();
         SetPosition(screen);
         _lDown = false;
         _rDown = false;
@@ -145,6 +156,7 @@ internal static class InputSpoof
     {
         _spoofMouse = false;
         _hwnd = IntPtr.Zero;
+        _senderThreadId = 0;
         _spoofModifiers = false;
         _lDown = false;
         _rDown = false;
@@ -211,6 +223,10 @@ internal static class InputSpoof
 
         if (_spoofMouse)
         {
+            // 우리 메시지를 처리하는 중이 아니면(사람의 진짜 입력, 타이머 등) 진짜 상태를 답한다.
+            if (!InSendMessage() && GetCurrentThreadId() != _senderThreadId)
+                return false;
+
             if (virtualKey == VK_LBUTTON)
             {
                 state = _lDown ? PressedState : (short)0;
@@ -221,32 +237,38 @@ internal static class InputSpoof
                 state = _rDown ? PressedState : (short)0;
                 return true;
             }
+            return TrySpoofModifier(virtualKey, out state);
         }
 
-        if (_spoofModifiers)
+        // 키 주입 경로: 키는 디스패처 작업 안에서 라우팅되므로(SendMessage 아님) 스푸프를 조건 없이 답한다.
+        return _spoofModifiers && TrySpoofModifier(virtualKey, out state);
+    }
+
+    /// <summary>수식키 VK 면 요청된 조합에 따라 눌림/안 눌림을 답합니다.</summary>
+    private static bool TrySpoofModifier(int virtualKey, out short state)
+    {
+        state = 0;
+        var modifiers = _modifiers;
+        switch (virtualKey)
         {
-            var modifiers = _modifiers;
-            switch (virtualKey)
-            {
-                case VK_CONTROL:
-                case VK_LCONTROL:
-                case VK_RCONTROL:
-                    state = modifiers.HasFlag(ModifierKeys.Control) ? PressedState : (short)0;
-                    return true;
-                case VK_SHIFT:
-                case VK_LSHIFT:
-                case VK_RSHIFT:
-                    state = modifiers.HasFlag(ModifierKeys.Shift) ? PressedState : (short)0;
-                    return true;
-                case VK_MENU:
-                case VK_LMENU:
-                case VK_RMENU:
-                    state = modifiers.HasFlag(ModifierKeys.Alt) ? PressedState : (short)0;
-                    return true;
-            }
+            case VK_CONTROL:
+            case VK_LCONTROL:
+            case VK_RCONTROL:
+                state = modifiers.HasFlag(ModifierKeys.Control) ? PressedState : (short)0;
+                return true;
+            case VK_SHIFT:
+            case VK_LSHIFT:
+            case VK_RSHIFT:
+                state = modifiers.HasFlag(ModifierKeys.Shift) ? PressedState : (short)0;
+                return true;
+            case VK_MENU:
+            case VK_LMENU:
+            case VK_RMENU:
+                state = modifiers.HasFlag(ModifierKeys.Alt) ? PressedState : (short)0;
+                return true;
+            default:
+                return false;
         }
-
-        return false;
     }
 
     #endregion
@@ -363,6 +385,13 @@ internal static class InputSpoof
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool InSendMessage();
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

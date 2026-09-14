@@ -9,7 +9,8 @@ namespace Xapper.Tests;
 /// <summary>
 /// 후킹 경로 제스처가 실제 WPF 창에서 의도한 라우팅 이벤트를 일으키는지 검증한다. 커서를 옮기지 않고
 /// WM 메시지 + 입력 상태 스푸프만으로 휠·우클릭·Ctrl+클릭이 WPF 에 진짜 입력으로 받아들여지는지 측정한다.
-/// 창은 화면 밖에 두며, 같은 스레드에서 SendMessage 하면 WndProc 로 동기 전달되므로 펌프가 필요 없다.
+/// 창은 화면 밖에 둔다. 같은 스레드에서 SendMessage 하면 WndProc 로 동기 전달되므로 펌프가 필요 없고, 프로덕션 경로를
+/// 검증하는 테스트는 <see cref="FromWorker"/> 로 워커 스레드에서 보내며 창 스레드가 펌프한다.
 /// </summary>
 [Collection(DesktopWindowCollection.Name)]
 public class SyntheticMouseGestureTests
@@ -29,7 +30,7 @@ public class SyntheticMouseGestureTests
             {
                 Assert.Equal(0, viewer.VerticalOffset);
 
-                var ok = SyntheticMouse.TryWheel(hwnd, CentreOf(viewer), -3);
+                var ok = SyntheticMouse.TryWheel(hwnd, CentreOf(viewer), -3) == GestureResult.Delivered;
                 window.UpdateLayout();
 
                 Assert.True(ok);
@@ -49,7 +50,7 @@ public class SyntheticMouseGestureTests
                 box.ContextMenuOpening += (_, e) => { opening++; e.Handled = true; };
                 box.MouseRightButtonUp += (_, _) => rightUp++;
 
-                var ok = SyntheticMouse.TryRightClick(hwnd, CentreOf(box));
+                var ok = SyntheticMouse.TryRightClick(hwnd, CentreOf(box)) == GestureResult.Delivered;
 
                 Assert.True(ok);
                 Assert.Equal(1, rightUp);
@@ -67,13 +68,114 @@ public class SyntheticMouseGestureTests
                 var seen = ModifierKeys.None;
                 var downs = 0;
                 border.PreviewMouseLeftButtonDown += (_, _) => { downs++; seen = Keyboard.Modifiers; };
+                var point = CentreOf(border);
 
-                var ok = SyntheticMouse.TryClick(hwnd, CentreOf(border), ModifierKeys.Control);
+                // 프로덕션처럼 다른 스레드(IPC 스레드)에서 보낸다 — 창 스레드는 그동안 메시지를 펌프한다.
+                var ok = FromWorker(() => SyntheticMouse.TryClick(hwnd, point, ModifierKeys.Control) == GestureResult.Delivered);
 
                 Assert.True(ok);
                 Assert.Equal(1, downs);
                 Assert.Equal(ModifierKeys.Control, seen);
                 Assert.Equal(ModifierKeys.None, Keyboard.Modifiers); // 제스처가 끝나면 스푸프가 꺼진다.
+            });
+    }
+
+    [Fact]
+    public void TryClick_SpoofsButtonsAndModifiersOnlyWhileHandlingItsOwnMessages()
+    {
+        WithWindow(
+            () => new Border { Background = System.Windows.Media.Brushes.LightGray, Width = 120, Height = 60 },
+            (window, hwnd, border) =>
+            {
+                // 제스처 중에도 우리 메시지 밖에서 읽는 상태는 진짜여야 한다 — 그래야 같은 시간에 들어온 사람의 진짜
+                // 입력이 엉뚱하게 처리되지 않는다(측정: 느린 핸들러 동안 프로세스 전체가 가짜 상태를 봤던 결함).
+                var insideHandler = ModifierKeys.None;
+                var outsideSamples = new List<ModifierKeys>();
+                border.PreviewMouseLeftButtonDown += (_, _) =>
+                {
+                    insideHandler = Keyboard.Modifiers;
+                    Thread.Sleep(20); // 느린 핸들러 흉내(워치독 한도보다 훨씬 짧게): 이 동안 스푸프가 켜져 있다.
+                };
+                var timer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Input)
+                {
+                    Interval = TimeSpan.FromMilliseconds(5)
+                };
+                timer.Tick += (_, _) => outsideSamples.Add(Keyboard.Modifiers); // 우리 메시지 사이(펌프 중)에 읽는다.
+                timer.Start();
+                var point = CentreOf(border);
+
+                var ok = FromWorker(() => SyntheticMouse.TryClick(hwnd, point, ModifierKeys.Control) == GestureResult.Delivered);
+                timer.Stop();
+
+                Assert.True(ok);
+                Assert.Equal(ModifierKeys.Control, insideHandler);
+                Assert.NotEmpty(outsideSamples);
+                Assert.All(outsideSamples, m => Assert.Equal(ModifierKeys.None, m));
+            });
+    }
+
+    [Fact]
+    public void TryClick_WhenTheHandlerStalls_EndsTheSpoofEarlyAndReportsStalled()
+    {
+        WithWindow(
+            () => new Border { Background = System.Windows.Media.Brushes.LightGray, Width = 120, Height = 60 },
+            (window, hwnd, border) =>
+            {
+                // 핸들러가 제한 시간(250ms)을 넘기면 보낸 쪽 워치독이 스푸프를 끈다: 핸들러 시작 시엔 Ctrl 이 보이고,
+                // 350ms 뒤(같은 핸들러 안, 아직 우리 메시지 처리 중)엔 진짜 상태(None)가 보여야 한다.
+                var atStart = ModifierKeys.None;
+                var later = ModifierKeys.Control;
+                var ups = 0;
+                border.PreviewMouseLeftButtonDown += (_, _) =>
+                {
+                    atStart = Keyboard.Modifiers;
+                    Thread.Sleep(SyntheticMouse.StallTimeoutMs + 100);
+                    later = Keyboard.Modifiers;
+                };
+                border.PreviewMouseLeftButtonUp += (_, _) => ups++;
+                var point = CentreOf(border);
+
+                var dispatcher = window.Dispatcher;
+                var result = FromWorker(() => SyntheticMouse.TryClick(hwnd, point, ModifierKeys.Control));
+                // 느린 핸들러는 결국 끝난다: 응답을 "아직 처리 중" 으로 돌리지 않도록 정체 뒤 기다리면 곧 true 여야 한다.
+                var finished = FromWorker(() => SyntheticMouse.WaitUntilHandledAsync(dispatcher, TimeSpan.FromSeconds(2)).Result);
+
+                Assert.Equal(GestureResult.Stalled, result);
+                Assert.Equal(ModifierKeys.Control, atStart);
+                Assert.Equal(ModifierKeys.None, later);
+                Assert.Equal(ModifierKeys.None, Keyboard.Modifiers);
+                Assert.True(finished);
+                Assert.Equal(1, ups); // 스푸프가 꺼져도 뗌은 자기 좌표로 라우팅되므로 클릭은 완성된다.
+            });
+    }
+
+    [Fact]
+    public void WaitUntilHandled_WhileTheHandlerRunsANestedLoop_ReportsStillHandlingUntilItReturns()
+    {
+        WithWindow(
+            () => new Border { Background = System.Windows.Media.Brushes.LightGray, Width = 120, Height = 60 },
+            (window, hwnd, border) =>
+            {
+                // 모달 대화상자 흉내: 핸들러가 중첩 메시지 루프를 돌린다. 그 안에서도 디스패처 작업은 돌지만 우리 메시지는
+                // 아직 처리 중이므로 "끝났다" 로 보면 안 되고, 루프가 끝난 뒤에야 끝난 것으로 봐야 한다.
+                var modal = new System.Windows.Threading.DispatcherFrame();
+                border.PreviewMouseLeftButtonDown += (_, _) => System.Windows.Threading.Dispatcher.PushFrame(modal);
+                var point = CentreOf(border);
+                var dispatcher = window.Dispatcher;
+
+                // 중첩 루프가 도는 동안 이 스레드는 거기 붙잡혀 있으므로, 루프를 끝내는 것도 워커가 디스패처에 걸어 준다.
+                var (result, whileModal, afterModal) = FromWorker(() =>
+                {
+                    var click = SyntheticMouse.TryClick(hwnd, point, ModifierKeys.None);
+                    var during = SyntheticMouse.WaitUntilHandledAsync(dispatcher, TimeSpan.FromMilliseconds(400)).Result;
+                    dispatcher.BeginInvoke(() => modal.Continue = false);
+                    var after = SyntheticMouse.WaitUntilHandledAsync(dispatcher, TimeSpan.FromSeconds(2)).Result;
+                    return (click, during, after);
+                });
+
+                Assert.Equal(GestureResult.Stalled, result);
+                Assert.False(whileModal);
+                Assert.True(afterModal);
             });
     }
 
@@ -98,7 +200,7 @@ public class SyntheticMouseGestureTests
                 try
                 {
                     Assert.True(InputSpoof.IsCoveredByOwnWindow(hwnd, CentreOf(border)));
-                    Assert.False(SyntheticMouse.TryClick(hwnd, CentreOf(border)));
+                    Assert.Equal(GestureResult.Unavailable, SyntheticMouse.TryClick(hwnd, CentreOf(border)));
                     Assert.Equal(0, downs);
                 }
                 finally
@@ -108,7 +210,7 @@ public class SyntheticMouseGestureTests
 
                 // 덮개가 사라지면 다시 후킹 경로로 전달된다.
                 Assert.False(InputSpoof.IsCoveredByOwnWindow(hwnd, CentreOf(border)));
-                Assert.True(SyntheticMouse.TryClick(hwnd, CentreOf(border)));
+                Assert.Equal(GestureResult.Delivered, SyntheticMouse.TryClick(hwnd, CentreOf(border)));
                 Assert.Equal(1, downs);
             });
     }
@@ -156,6 +258,20 @@ public class SyntheticMouseGestureTests
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    /// <summary>
+    /// 제스처를 워커 스레드에서 실행하고 창 스레드는 그동안 메시지를 펌프합니다. 프로덕션에서 IPC 스레드가 보내는
+    /// 것과 같은 경로라, 같은 스레드에서 SendMessage 할 때는 false 인 InSendMessage 스코프가 실제로 검증된다.
+    /// </summary>
+    private static T FromWorker<T>(Func<T> gesture)
+    {
+        var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        var task = Task.Run(gesture);
+        task.ContinueWith(_ => dispatcher.BeginInvoke(() => frame.Continue = false), TaskScheduler.Default);
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+        return task.GetAwaiter().GetResult();
+    }
 
     private static Point CentreOf(FrameworkElement element)
         => element.PointToScreen(new Point(element.ActualWidth / 2, element.ActualHeight / 2));
