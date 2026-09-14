@@ -121,7 +121,8 @@ public class FirstChanceSafetyTests
             var pong = await IpcSerializer.DeserializeAsync(healthy);
             Assert.NotNull(pong);
 
-            Assert.Empty(logged);
+            // 요청마다 소요 시간 줄이 찍히므로 '예외 경로를 탔다'는 신호인 Connection dropped 줄만 없으면 된다.
+            Assert.DoesNotContain(logged, line => line.Contains("Connection dropped"));
         }
         finally
         {
