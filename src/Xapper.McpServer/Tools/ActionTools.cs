@@ -50,7 +50,9 @@ public sealed class ActionTools
         "their work on the UI thread rather than running it inline, so this call waits for that queue to drain " +
         "before " +
         "answering; when it returns the application has processed the click, unless the response says it was " +
-        "still busy. There is no double-click: two coordinate clicks in a row may not register as one, " +
+        "still busy or still handling the click - the latter means a modal dialog most likely opened, and the " +
+        "call returned after timeout rather than waiting for the person to close it. There is no double-click: " +
+        "two coordinate clicks in a row may not register as one, " +
         "because the interval between calls exceeds the system double-click time. The response also warns " +
         "when the element is unreachable by a real mouse, or when the window could not be activated. " +
         "To double-click, use xapper_doubleclick instead. Pass modifiers (e.g. \"Ctrl\") for a Ctrl-click or " +
@@ -210,7 +212,10 @@ public sealed class ActionTools
         "inside the target process (no real key is pressed and nothing leaks to other windows). If that in-process " +
         "path cannot be set up in this process the call returns an error rather than pressing real keys. A " +
         "character with Ctrl or Alt is sent as a key chord only, not typed (Ctrl+a selects all, it does not insert " +
-        "'a'). xapper_key is for keys and chords; xapper_type is for text.")]
+        "'a'). xapper_key is for keys and chords; xapper_type is for text. If the key opens a modal dialog " +
+        "(a MessageBox asking to confirm a delete, say), the call does not wait for the person to answer it: it " +
+        "returns after timeout saying the application is still handling the key, and the dialog is a Win32 window " +
+        "you can see with xapper_screenshot mode=\"screen\" but not in a snapshot.")]
     public async Task<string> Key(
         [Description("Key to send: a WPF Key name (F2, Enter, Escape, Tab, Down), a single printable character, or a string to type character by character in this one call")] string key,
         [Description(ModifiersDescription)] string? modifiers = null,

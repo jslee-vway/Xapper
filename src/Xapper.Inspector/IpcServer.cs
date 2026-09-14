@@ -138,6 +138,33 @@ public sealed class IpcServer
     }
 
     /// <summary>
+    /// 앱의 핸들러를 실행하는 작업을 UI 스레드에서 제한 시간까지만 기다립니다. 핸들러가 모달 대화상자를 열면
+    /// 끝나지 않으므로(<see cref="AutoWait.DispatcherCall"/>), 그때는 (false, 기본값) 을 돌려 호출자가
+    /// <see cref="StillHandlingResponse"/> 로 응답하게 한다.
+    /// </summary>
+    private static Task<(bool Completed, T? Result)> RunOnUiThread<T>(Func<T> action, int timeoutMs)
+    {
+        return AutoWait.DispatcherCall.RunAsync(Application.Current.Dispatcher, action, TimeSpan.FromMilliseconds(timeoutMs));
+    }
+
+    /// <summary>
+    /// 조작은 전달됐지만 앱이 제한 시간 안에 처리를 끝내지 못했을 때의 응답을 만듭니다. 대개 핸들러가 MessageBox 같은
+    /// 모달 대화상자를 연 경우다 — 그 대화상자는 Win32 창이라 스냅샷에 안 보이고, 닫힐 때까지 호출자가 매달리면 안 되므로
+    /// 성공(전달됨)으로 돌려주되 상황을 알린다.
+    /// </summary>
+    private static IpcMessage StillHandlingResponse(string messageId, string what, int timeoutMs)
+    {
+        return IpcSerializer.CreateResponse(messageId, new ActionResponse
+        {
+            Success = true,
+            Message = $"{what} was delivered, but the application has not finished handling it after {timeoutMs} ms. " +
+                      "It is most likely showing a modal dialog (a MessageBox is a Win32 window and does not appear in " +
+                      "snapshots - use xapper_screenshot with mode=\"screen\" to see it). The person has to dismiss it; " +
+                      "until then other calls may report the application as busy, and this action's own outcome is unknown."
+        });
+    }
+
+    /// <summary>
     /// 참조 번호를 해석하고, 사라졌으면 무엇을 해야 하는지 알려주는 오류 응답을 <paramref name="error"/> 에 담습니다.
     /// 예외를 던지지 않는다: 주입된 프로세스 안에서 던지면 대상 앱의 first-chance 핸들러가 그 예외로
     /// 앱을 죽일 수 있다(결함 2). 오래된 ref 는 흔한 정상 경로이므로 호출자가 오류 응답으로 처리한다.
@@ -385,8 +412,10 @@ public sealed class IpcServer
             // 후킹을 걸 수 없으면 아래의 기존 좌표 클릭(실제 입력)으로 폴백한다.
         }
 
-        var outcome = await Application.Current.Dispatcher.InvokeAsync(
-            () => ClickAction.Execute(element, request.X, request.Y, request.DoubleClick, modifiers));
+        var (clickDone, outcome) = await RunOnUiThread(
+            () => ClickAction.Execute(element, request.X, request.Y, request.DoubleClick, modifiers), request.Timeout);
+        if (!clickDone)
+            return StillHandlingResponse(message.Id, $"The click on ref={request.Ref}", request.Timeout);
 
         var posInfo = request.X.HasValue && request.Y.HasValue
             ? $" at ({request.X:F2},{request.Y:F2})"
@@ -540,8 +569,10 @@ public sealed class IpcServer
         // ref 가 없으면 현재 포커스 요소에 키 입력으로 타이핑한다(F2 로 연 인라인 편집기처럼 스냅샷에 없는 편집기).
         if (request.Ref is not { } elementRef)
         {
-            var focusedResult = await Application.Current.Dispatcher.InvokeAsync(
-                () => TypeAction.ExecuteOnFocused(request.Text, request.Clear));
+            var (focusedDone, focusedResult) = await RunOnUiThread(
+                () => TypeAction.ExecuteOnFocused(request.Text, request.Clear), request.Timeout);
+            if (!focusedDone)
+                return StillHandlingResponse(message.Id, "The typed text", request.Timeout);
             if (focusedResult.Error is { } focusedReason)
                 return IpcSerializer.CreateError(message.Id, focusedReason);
 
@@ -559,8 +590,10 @@ public sealed class IpcServer
         if (!await waiter.WaitForReady(element))
             return NotReadyError(message.Id, elementRef, request.Timeout);
 
-        var result = await Application.Current.Dispatcher.InvokeAsync(
-            () => TypeAction.Execute(element, request.Text, request.Clear));
+        var (typeDone, result) = await RunOnUiThread(
+            () => TypeAction.Execute(element, request.Text, request.Clear), request.Timeout);
+        if (!typeDone)
+            return StillHandlingResponse(message.Id, $"The typed text for ref={elementRef}", request.Timeout);
         if (result.Error is { } reason)
             return IpcSerializer.CreateError(message.Id, reason);
 
@@ -593,8 +626,16 @@ public sealed class IpcServer
                 return NotReadyError(message.Id, elementRef, request.Timeout);
         }
 
-        var (keyError, focused, modifierPath) = await Application.Current.Dispatcher.InvokeAsync(
-            () => KeyboardInput.Send(refElement, request.Key, modifiers));
+        var (keyDone, keyResult) = await RunOnUiThread(
+            () => KeyboardInput.Send(refElement, request.Key, modifiers), request.Timeout);
+        if (!keyDone)
+        {
+            // 핸들러가 모달 대화상자 안에 머물러 Send 의 finally 가 아직 안 돌았다. 대화상자가 떠 있는 동안 수식키가
+            // 눌린 것으로 남으면 사람의 입력이 오염되므로 여기서 스푸프를 푼다(나중에 finally 가 다시 풀어도 무해).
+            InputSpoof.EndModifiers();
+            return StillHandlingResponse(message.Id, $"The key {request.Key}", request.Timeout);
+        }
+        var (keyError, focused, modifierPath) = keyResult;
         if (keyError is not null)
             return IpcSerializer.CreateError(message.Id, keyError);
 
@@ -619,8 +660,10 @@ public sealed class IpcServer
         if (!await waiter.WaitForReady(element))
             return NotReadyError(message.Id, request.Ref, request.Timeout);
 
-        var result = await Application.Current.Dispatcher.InvokeAsync(
-            () => SelectAction.Execute(element, request.ItemText, request.ItemIndex));
+        var (selectDone, result) = await RunOnUiThread(
+            () => SelectAction.Execute(element, request.ItemText, request.ItemIndex), request.Timeout);
+        if (!selectDone)
+            return StillHandlingResponse(message.Id, $"The selection on ref={request.Ref}", request.Timeout);
         if (result.Error is { } reason)
             return IpcSerializer.CreateError(message.Id, reason);
 
@@ -645,7 +688,9 @@ public sealed class IpcServer
         if (!await waiter.WaitForReady(element))
             return NotReadyError(message.Id, request.Ref, request.Timeout);
 
-        var result = await Application.Current.Dispatcher.InvokeAsync(() => ToggleAction.Execute(element));
+        var (toggleDone, result) = await RunOnUiThread(() => ToggleAction.Execute(element), request.Timeout);
+        if (!toggleDone)
+            return StillHandlingResponse(message.Id, $"The toggle on ref={request.Ref}", request.Timeout);
         if (result.Error is { } reason)
             return IpcSerializer.CreateError(message.Id, reason);
 
@@ -670,8 +715,10 @@ public sealed class IpcServer
         if (!await waiter.WaitForReady(element))
             return NotReadyError(message.Id, request.Ref, request.Timeout);
 
-        var result = await Application.Current.Dispatcher.InvokeAsync(
-            () => ExpandAction.Execute(element, request.Expand));
+        var (expandDone, result) = await RunOnUiThread(
+            () => ExpandAction.Execute(element, request.Expand), request.Timeout);
+        if (!expandDone)
+            return StillHandlingResponse(message.Id, $"The expand/collapse on ref={request.Ref}", request.Timeout);
         if (result.Error is { } reason)
             return IpcSerializer.CreateError(message.Id, reason);
 
@@ -697,8 +744,10 @@ public sealed class IpcServer
         if (!await waiter.WaitForReady(element))
             return NotReadyError(message.Id, request.Ref, request.Timeout);
 
-        var result = await Application.Current.Dispatcher.InvokeAsync(
-            () => ScrollAction.Execute(element, request.HorizontalPercent, request.VerticalPercent));
+        var (scrollDone, result) = await RunOnUiThread(
+            () => ScrollAction.Execute(element, request.HorizontalPercent, request.VerticalPercent), request.Timeout);
+        if (!scrollDone)
+            return StillHandlingResponse(message.Id, $"The scroll on ref={request.Ref}", request.Timeout);
         if (result.Error is { } reason)
             return IpcSerializer.CreateError(message.Id, reason);
 
@@ -749,7 +798,7 @@ public sealed class IpcServer
         if (!ModifierParser.TryParse(request.Modifiers, out var modifiers, out var modifierError))
             return IpcSerializer.CreateError(message.Id, modifierError);
 
-        var outcome = await Application.Current.Dispatcher.InvokeAsync(() =>
+        var (dragResolved, outcome) = await RunOnUiThread(() =>
         {
             var start = ResolveStartPoint(source, request);
             var end = ResolveEndPoint(target, request, start);
@@ -770,7 +819,9 @@ public sealed class IpcServer
                      : target is not null ? HwndHandleOf(target)
                      : IntPtr.Zero;
             return (Start: start, End: end, UsedThumb: false, Hwnd: hwnd);
-        });
+        }, request.Timeout);
+        if (!dragResolved)
+            return StillHandlingResponse(message.Id, "The drag", request.Timeout);
 
         var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
 
