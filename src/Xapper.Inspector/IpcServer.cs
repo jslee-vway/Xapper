@@ -100,8 +100,14 @@ public sealed class IpcServer
             var message = await IpcSerializer.DeserializeAsync(pipe, ct);
             if (message == null) break;
 
+            // 느리다는 보고를 가르기 위해 요청마다 소요 시간을 남긴다. UI 스레드 대기(앱이 바쁜 경우)와
+            // 처리 자체(큰 트리 순회 등)를 구분할 수 있게, 처리 전에 빈 디스패치 한 번으로 큐 대기를 잰다.
+            var uiWaitMs = await MeasureUiQueueWaitAsync();
+            var watch = System.Diagnostics.Stopwatch.StartNew();
             var response = await ProcessMessage(message);
+            watch.Stop();
             var responseBytes = IpcSerializer.Serialize(response);
+            _log?.Invoke($"{message.Method}: {watch.ElapsedMilliseconds} ms (ui queue wait {uiWaitMs} ms, response {responseBytes.Length} bytes)");
 
             // 상한을 넘는 프레임은 수신 측이 거부하고, 그 시점에는 이미 연결이 어긋나 세션이 끝난다.
             // 보내기 전에 잡아 무엇을 어떻게 줄이면 되는지 알려주는 오류로 바꾼다.
@@ -111,6 +117,28 @@ public sealed class IpcServer
             await pipe.WriteAsync(responseBytes, ct);
             await pipe.FlushAsync(ct);
         }
+    }
+
+    /// <summary>
+    /// UI 스레드 큐에 빈 작업을 넣어 처리될 때까지의 시간을 잽니다. 앱이 바빠 디스패처가 밀려 있으면 이 값이 커진다.
+    /// 앱이 없거나 디스패처가 내려가는 중이면 -1.
+    /// </summary>
+    private static async Task<long> MeasureUiQueueWaitAsync()
+    {
+        var application = Application.Current;
+        if (application is null)
+            return -1;
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            await application.Dispatcher.InvokeAsync(() => { });
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException)
+        {
+            return -1;
+        }
+        return watch.ElapsedMilliseconds;
     }
 
     /// <summary>
