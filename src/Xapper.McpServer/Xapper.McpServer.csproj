@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +15,11 @@
   <!-- 내부 판별 로직을 공개 API로 올리지 않고 테스트에서 검증하기 위함 -->
   <ItemGroup>
     <InternalsVisibleTo Include="Xapper.Tests" />
+  </ItemGroup>
+
+  <!-- UseWPF 는 암시적 using 에서 System.IO 를 뺀다. 기존 파일이 그대로 컴파일되도록 되돌린다. -->
+  <ItemGroup>
+    <Using Include="System.IO" />
   </ItemGroup>
 
   <ItemGroup>
