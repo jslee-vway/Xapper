@@ -64,6 +64,11 @@ var serverInstructions = """
     focus; the response names which path ran ("synthetic mouse input" vs "real mouse input"). Prefer refs and
     coordinates freely - the cursor stays the person's in the normal case.
 
+    When you expect real mouse input - a response already said "via real mouse input", or the in-process path
+    is unavailable - call xapper_notice_show first so the person sees a "Xapper 조작중" banner over the app and
+    keeps their hands off, and xapper_notice_hide when that stretch of work is over. If an action drives the real
+    mouse while the banner is down, the server raises it for you and says so in the response; you still hide it.
+
     Attach first: xapper_list_processes, then xapper_attach. Attaching again to a process you are already
     attached to is rejected, but the rejection surfaces only after the injection attempt, as a connect
     failure - so detach before re-attaching rather than retrying.
@@ -81,6 +86,7 @@ var serverInstructions = """
     """;
 
 builder.Services.AddSingleton<SessionManager>();
+builder.Services.AddSingleton<IOperatorNotice, OperatorNotice>();
 builder.Services.AddSingleton(new WpfProcessInjector(inspectorBaseDir, genericInjectorDir));
 
 builder.Services.AddMcpServer(options =>
@@ -100,7 +106,8 @@ builder.Services.AddMcpServer(options =>
 .WithTools<DiagnosticTools>()
 .WithTools<CaptureTools>()
 .WithTools<FindTools>()
-.WithTools<BatchTools>();
+.WithTools<BatchTools>()
+.WithTools<NoticeTools>();
 
 var app = builder.Build();
 await app.RunAsync();
