@@ -27,12 +27,18 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
     /// <summary>헤드라인 아래 기본 안내. 에이전트가 message 를 주면 그것으로 바뀐다.</summary>
     private const string DefaultDetail = "AI 가 이 프로그램을 조작하고 있습니다 — 알림이 사라질 때까지 마우스와 키보드를 잠시 두세요";
 
-    /// <summary>창이 그려질 때까지 기다릴 최대 시간. 화면이 느려도 조작을 이만큼 이상 늦추지는 않는다.</summary>
-    private static readonly TimeSpan ShowTimeout = TimeSpan.FromSeconds(1);
+    /// <summary>
+    /// 알림 스레드의 응답을 기다릴 최대 시간. 화면이 느려도 조작을 이만큼 이상 늦추지 않고, 알림 스레드가 죽어
+    /// 디스패처 작업이 영영 돌지 않아도 도구 호출이 여기서 끝난다.
+    /// </summary>
+    private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(1);
 
     private readonly object _gate = new();
     private Thread? _thread;
-    private Dispatcher? _dispatcher;
+
+    /// <summary>알림 스레드가 창을 만들고 넘겨준 디스패처. 첫 호출이 만들고 그 뒤 호출은 같은 작업을 기다린다 —
+    /// 동시에 두 번 부르면 스레드와 창이 둘 생기고 하나는 영영 안 내려가므로, 완료 여부가 아니라 작업 자체를 공유한다.</summary>
+    private Task<Dispatcher>? _ready;
     private Window? _window;
     private TextBlock? _detail;
     private IntPtr _handle;
@@ -75,10 +81,16 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
         {
             // 입력이 나가기 전에 알림이 화면에 있어야 하므로 그려질 때까지 기다린다. 단, 무한정은 아니다 —
             // 늦게라도 뜨고, 상태는 이미 "보임" 이므로 hide 가 내린다.
-            await shown.Task.WaitAsync(ShowTimeout, ct);
+            await shown.Task.WaitAsync(OperationTimeout, ct);
         }
         catch (TimeoutException)
         {
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            // Show 안에서 난 예외: 창은 안 떴다.
+            _visible = false;
+            return (false, $"the notice window could not be shown: {failure.Message}");
         }
 
         return (true, null);
@@ -87,17 +99,19 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
     /// <inheritdoc />
     public async Task HideAsync(CancellationToken ct)
     {
-        Dispatcher? dispatcher;
-        lock (_gate)
-        {
-            dispatcher = _dispatcher;
-        }
-
         _visible = false;
+        var dispatcher = DispatcherIfRunning();
         if (dispatcher is null)
             return;
 
-        await dispatcher.InvokeAsync(() => _window?.Hide()).Task.WaitAsync(ct);
+        try
+        {
+            await dispatcher.InvokeAsync(() => _window?.Hide()).Task.WaitAsync(OperationTimeout, ct);
+        }
+        catch (TimeoutException)
+        {
+            // 알림 스레드가 응답하지 않는다. 내릴 창이 있다면 어차피 못 내리고, 도구 호출을 여기서 붙들지 않는다.
+        }
     }
 
     /// <summary>
@@ -105,13 +119,12 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        Dispatcher? dispatcher;
         Thread? thread;
+        var dispatcher = DispatcherIfRunning();
         lock (_gate)
         {
-            dispatcher = _dispatcher;
             thread = _thread;
-            _dispatcher = null;
+            _ready = null;
             _thread = null;
         }
 
@@ -134,8 +147,8 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
     {
         lock (_gate)
         {
-            if (_dispatcher is not null)
-                return Task.FromResult(_dispatcher);
+            if (_ready is not null)
+                return _ready;
 
             var ready = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
             _thread = new Thread(() =>
@@ -159,15 +172,17 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
             _thread.SetApartmentState(ApartmentState.STA);
             _thread.Start();
 
-            return ready.Task.ContinueWith(task =>
-            {
-                lock (_gate)
-                {
-                    _dispatcher = task.Result;
-                }
+            _ready = ready.Task;
+            return _ready;
+        }
+    }
 
-                return task.Result;
-            }, TaskContinuationOptions.OnlyOnRanToCompletion);
+    /// <summary>알림 스레드가 창을 만들어 디스패처를 넘겨준 상태면 그 디스패처, 아직이거나 실패했거나 내려갔으면 null.</summary>
+    private Dispatcher? DispatcherIfRunning()
+    {
+        lock (_gate)
+        {
+            return _ready is { IsCompletedSuccessfully: true } ready ? ready.Result : null;
         }
     }
 
@@ -244,22 +259,34 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
             return;
         }
 
-        _detail.Text = string.IsNullOrWhiteSpace(message) ? DefaultDetail : message.Trim();
-        _window.Show();
-
-        if (_handle != IntPtr.Zero && GetWindowRect(_handle, out var self))
+        try
         {
-            var area = target ?? PrimaryWorkArea();
-            var (x, y) = NoticePlacement.TopCentre(area.Left, area.Top, area.Right, area.Bottom,
-                self.Right - self.Left, self.Bottom - self.Top);
-            SetWindowPos(_handle, HwndTopmost, x, y, 0, 0, SwpNoSize | SwpNoActivate);
+            _detail.Text = string.IsNullOrWhiteSpace(message) ? DefaultDetail : message.Trim();
+            _window.Show();
+
+            if (_handle != IntPtr.Zero && GetWindowRect(_handle, out var self))
+            {
+                var area = target ?? PrimaryWorkArea();
+                var (x, y) = NoticePlacement.TopCentre(area.Left, area.Top, area.Right, area.Bottom,
+                    self.Right - self.Left, self.Bottom - self.Top);
+                SetWindowPos(_handle, HwndTopmost, x, y, 0, 0, SwpNoSize | SwpNoActivate);
+            }
+        }
+        catch (Exception failure)
+        {
+            // 호출자가 (false, 이유) 로 돌려준다. 여기서 던지면 디스패처 작업 안에서 삼켜져 아무도 모른다.
+            shown.TrySetException(failure);
+            return;
         }
 
         // 그리기 뒤에 도는 우선순위에 걸어 두면, 여기 도달했을 때는 창이 실제로 화면에 있다.
         _window.Dispatcher.InvokeAsync(() => shown.TrySetResult(), DispatcherPriority.ContextIdle);
     }
 
-    /// <summary>대상 프로세스의 주 창 사각형. PID 가 없거나 주 창이 없거나 프로세스가 사라졌으면 null.</summary>
+    /// <summary>
+    /// 대상 프로세스의 주 창 사각형. PID 가 없거나 주 창이 없거나 프로세스가 사라졌으면 null. 최소화된 창도 null 이다 —
+    /// 그 사각형은 화면 밖(-32000)이라 알림까지 안 보이게 된다.
+    /// </summary>
     private static RECT? TargetRectangleOf(int? processId)
     {
         if (processId is null)
@@ -269,7 +296,7 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
         {
             using var process = Process.GetProcessById(processId.Value);
             var handle = process.MainWindowHandle;
-            if (handle == IntPtr.Zero || !GetWindowRect(handle, out var rect))
+            if (handle == IntPtr.Zero || IsIconic(handle) || !GetWindowRect(handle, out var rect))
                 return null;
             return rect;
         }
@@ -327,6 +354,10 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

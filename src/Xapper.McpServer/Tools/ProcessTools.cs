@@ -115,9 +115,6 @@ public sealed class ProcessTools
         [Description("Process ID (optional, defaults to active session)")] int? pid = null,
         CancellationToken ct = default)
     {
-        // 세션이 끝나면 조작도 끝난 것이다. 알림이 남아 사람이 헛되이 기다리지 않게 먼저 내린다.
-        await _notice.HideAsync(ct);
-
         try
         {
             await _sessionManager.DetachAsync(pid, ct);
@@ -126,8 +123,13 @@ public sealed class ProcessTools
         {
             // DetachAsync 는 활성 세션이 없을 때만 이 예외를 던진다 — 이미 분리된 상태이므로 오류가 아니다.
             // (다른 예외는 삼키지 않는다: 연결 정리가 실제로 실패한 것을 성공으로 위장하면 세션이 어긋난 채 남는다.)
+            await _notice.HideAsync(ct);
             return "Already detached (no active session).";
         }
+
+        // 세션이 끝나면 조작도 끝난 것이다. 알림이 남아 사람이 헛되이 기다리지 않게 내린다 — 분리가 거절된
+        // 경우(다른 pid)는 세션이 살아 있으므로 그대로 둔다.
+        await _notice.HideAsync(ct);
 
         return pid.HasValue
             ? $"Detached from process {pid}."

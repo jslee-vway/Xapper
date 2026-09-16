@@ -29,6 +29,10 @@ public class OperatorNoticeTests
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
 
     private static long ExtendedStyleOf(IntPtr handle) => GetWindowLongPtr(handle, GwlExStyle).ToInt64();
 
@@ -107,16 +111,52 @@ public class OperatorNoticeTests
     }
 
     [Fact]
-    public async Task Show_OverAWindow_SitsAtItsTopCentre()
+    public async Task Show_WhenTheTargetHasNoMainWindow_FallsBackToTheWorkArea()
     {
         await using var notice = new OperatorNotice();
 
-        // 이 테스트 프로세스 자신의 창 위에 놓아 본다: PID 를 넘기면 그 프로세스의 주 창 사각형을 읽는다.
-        // 테스트 러너에는 주 창이 없으므로 여기서는 사각형 조회 실패 → 주 모니터 폴백이 오류 없이 돌아오는지만 본다.
+        // 테스트 러너 프로세스에는 주 창이 없다: 사각형 조회가 비면 주 모니터 작업 영역 위쪽으로 오류 없이 떨어져야 한다.
         var (shown, error) = await notice.ShowAsync(null, Environment.ProcessId, CancellationToken.None);
 
         Assert.True(shown, error);
         Assert.True(GetWindowRect(notice.Handle, out var rect));
         Assert.True(rect.Top >= 0);
+    }
+
+    [Fact]
+    public async Task Show_CalledTwiceAtOnce_CreatesOneWindow()
+    {
+        await using var notice = new OperatorNotice();
+
+        // 도구 호출은 서버에서 직렬화되지 않는다. 첫 show 둘이 동시에 오면 스레드와 창이 둘 생기고 하나는 영영
+        // 안 내려가므로, 이 프로세스의 "Xapper" 최상위 창이 정확히 하나여야 한다.
+        var results = await Task.WhenAll(
+            notice.ShowAsync("one", null, CancellationToken.None),
+            notice.ShowAsync("two", null, CancellationToken.None));
+
+        Assert.All(results, r => Assert.True(r.Shown, r.Error));
+        Assert.Equal(1, CountNoticeWindows());
+
+        await notice.HideAsync(CancellationToken.None);
+        Assert.False(IsWindowVisible(notice.Handle));
+    }
+
+    /// <summary>이 프로세스가 가진 제목 "Xapper" 의 최상위 창 수.</summary>
+    private static int CountNoticeWindows()
+    {
+        var count = 0;
+        var pid = (uint)Environment.ProcessId;
+        EnumWindows((hwnd, _) =>
+        {
+            GetWindowThreadProcessId(hwnd, out var owner);
+            if (owner != pid)
+                return true;
+            var title = new System.Text.StringBuilder(64);
+            GetWindowText(hwnd, title, title.Capacity);
+            if (title.ToString() == "Xapper")
+                count++;
+            return true;
+        }, IntPtr.Zero);
+        return count;
     }
 }
