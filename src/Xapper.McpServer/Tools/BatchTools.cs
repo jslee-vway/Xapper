@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using Xapper.McpServer.Infrastructure;
 using Xapper.Protocol;
 
 namespace Xapper.McpServer.Tools;
@@ -16,14 +17,16 @@ public sealed class BatchTools
     #region Fields
 
     private readonly SessionManager _sessionManager;
+    private readonly IOperatorNotice _notice;
 
     #endregion
 
     #region Constructor
 
-    public BatchTools(SessionManager sessionManager)
+    public BatchTools(SessionManager sessionManager, IOperatorNotice notice)
     {
         _sessionManager = sessionManager;
+        _notice = notice;
     }
 
     #endregion
@@ -56,7 +59,7 @@ public sealed class BatchTools
         {
             var step = plan[i];
             var response = await client.SendAsync(IpcSerializer.CreateRequest(step.Method, step.Payload), ct);
-            var text = Format(step.Tool, response).TrimEnd();
+            var text = await _notice.AfterActionAsync(Format(step.Tool, response).TrimEnd(), _sessionManager.ActiveProcessId, ct);
 
             sb.Append($"{i + 1}. {text}");
 

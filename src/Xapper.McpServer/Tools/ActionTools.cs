@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
+using Xapper.McpServer.Infrastructure;
 
 namespace Xapper.McpServer.Tools;
 
@@ -14,10 +15,12 @@ public sealed class ActionTools
         "Modifiers to hold: \"Ctrl\", \"Shift\", \"Alt\" or a combination like \"Ctrl+Shift\"";
 
     private readonly SessionManager _sessionManager;
+    private readonly IOperatorNotice _notice;
 
-    public ActionTools(SessionManager sessionManager)
+    public ActionTools(SessionManager sessionManager, IOperatorNotice notice)
     {
         _sessionManager = sessionManager;
+        _notice = notice;
     }
 
     [McpServerTool(Name = "xapper_click"), Description(
@@ -51,7 +54,7 @@ public sealed class ActionTools
         var client = _sessionManager.GetActive();
         var response = await client.ClickAsync(@ref, target: target, timeout: timeout, x: x, y: y, doubleClick: false, modifiers: modifiers, ct: ct);
 
-        return ResponseFormat.Action(response, "Click succeeded");
+        return await _notice.AfterActionAsync(ResponseFormat.Action(response, "Click succeeded"), _sessionManager.ActiveProcessId, ct);
     }
 
     [McpServerTool(Name = "xapper_doubleclick"), Description(
@@ -74,7 +77,7 @@ public sealed class ActionTools
         var client = _sessionManager.GetActive();
         var response = await client.ClickAsync(@ref, target: target, timeout: timeout, x: x, y: y, doubleClick: true, modifiers: modifiers, ct: ct);
 
-        return ResponseFormat.Action(response, "Double-click succeeded");
+        return await _notice.AfterActionAsync(ResponseFormat.Action(response, "Double-click succeeded"), _sessionManager.ActiveProcessId, ct);
     }
 
     [McpServerTool(Name = "xapper_rightclick"), Description(
@@ -96,7 +99,7 @@ public sealed class ActionTools
         var client = _sessionManager.GetActive();
         var response = await client.RightClickAsync(@ref, target: target, x: x, y: y, modifiers: modifiers, timeout: timeout, ct: ct);
 
-        return ResponseFormat.Action(response, "Right-click succeeded");
+        return await _notice.AfterActionAsync(ResponseFormat.Action(response, "Right-click succeeded"), _sessionManager.ActiveProcessId, ct);
     }
 
     [McpServerTool(Name = "xapper_wheel"), Description(
@@ -120,7 +123,7 @@ public sealed class ActionTools
         var client = _sessionManager.GetActive();
         var response = await client.WheelAsync(@ref, target: target, notches: notches, x: x, y: y, modifiers: modifiers, timeout: timeout, ct: ct);
 
-        return ResponseFormat.Action(response, "Wheel succeeded");
+        return await _notice.AfterActionAsync(ResponseFormat.Action(response, "Wheel succeeded"), _sessionManager.ActiveProcessId, ct);
     }
 
     [McpServerTool(Name = "xapper_type"), Description(

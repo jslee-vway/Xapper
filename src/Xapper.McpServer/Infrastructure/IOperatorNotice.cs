@@ -22,3 +22,21 @@ public interface IOperatorNotice
     /// <summary>알림을 내립니다. 안 떠 있으면 아무것도 하지 않는다.</summary>
     Task HideAsync(CancellationToken ct);
 }
+
+/// <summary>도구들이 응답을 돌려주기 직전에 한 번 부르는 안전망 진입점.</summary>
+public static class OperatorNoticeExtensions
+{
+    /// <summary>
+    /// 응답이 실제 마우스를 썼다고 말하고 알림이 내려가 있으면 올리고, 응답에 그 사실을 덧붙여 돌려줍니다.
+    /// 알림을 못 띄워도 응답은 그대로 돌려준다 — 조작은 이미 끝났고 알림은 정보다.
+    /// </summary>
+    public static async Task<string> AfterActionAsync(
+        this IOperatorNotice notice, string responseText, int? targetProcessId, CancellationToken ct)
+    {
+        if (!OperatorNoticePolicy.ShouldRaise(responseText, notice.IsVisible))
+            return responseText;
+
+        var (shown, _) = await notice.ShowAsync(null, targetProcessId, ct);
+        return shown ? OperatorNoticePolicy.Annotate(responseText) : responseText;
+    }
+}

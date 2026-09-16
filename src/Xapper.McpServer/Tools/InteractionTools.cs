@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
+using Xapper.McpServer.Infrastructure;
 
 namespace Xapper.McpServer.Tools;
 
@@ -10,10 +11,12 @@ namespace Xapper.McpServer.Tools;
 public sealed class InteractionTools
 {
     private readonly SessionManager _sessionManager;
+    private readonly IOperatorNotice _notice;
 
-    public InteractionTools(SessionManager sessionManager)
+    public InteractionTools(SessionManager sessionManager, IOperatorNotice notice)
     {
         _sessionManager = sessionManager;
+        _notice = notice;
     }
 
     [McpServerTool(Name = "xapper_select"), Description("Select an item in a ComboBox, ListBox, or TabControl")]
@@ -107,6 +110,6 @@ public sealed class InteractionTools
         var response = await client.DragAsync(
             sourceRef, sourceX, sourceY, targetRef, targetX, targetY, offsetX, offsetY, modifiers, timeout, ct);
 
-        return ResponseFormat.Action(response, "Success");
+        return await _notice.AfterActionAsync(ResponseFormat.Action(response, "Success"), _sessionManager.ActiveProcessId, ct);
     }
 }
