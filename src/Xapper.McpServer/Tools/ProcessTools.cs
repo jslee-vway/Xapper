@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
 using Xapper.Injector;
+using Xapper.McpServer.Infrastructure;
 
 namespace Xapper.McpServer.Tools;
 
@@ -14,6 +15,7 @@ public sealed class ProcessTools
 
     private readonly SessionManager _sessionManager;
     private readonly WpfProcessInjector _injector;
+    private readonly IOperatorNotice _notice;
 
     #endregion
 
@@ -22,10 +24,11 @@ public sealed class ProcessTools
     /// <summary>
     /// <see cref="ProcessTools"/>의 새 인스턴스를 생성합니다.
     /// </summary>
-    public ProcessTools(SessionManager sessionManager, WpfProcessInjector injector)
+    public ProcessTools(SessionManager sessionManager, WpfProcessInjector injector, IOperatorNotice notice)
     {
         _sessionManager = sessionManager;
         _injector = injector;
+        _notice = notice;
     }
 
     #endregion
@@ -112,6 +115,9 @@ public sealed class ProcessTools
         [Description("Process ID (optional, defaults to active session)")] int? pid = null,
         CancellationToken ct = default)
     {
+        // 세션이 끝나면 조작도 끝난 것이다. 알림이 남아 사람이 헛되이 기다리지 않게 먼저 내린다.
+        await _notice.HideAsync(ct);
+
         try
         {
             await _sessionManager.DetachAsync(pid, ct);
