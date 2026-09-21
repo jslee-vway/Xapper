@@ -93,6 +93,19 @@ public class ScriptSessionTests
     }
 
     [Fact]
+    public void Type_WithoutOptions_SendsANumericTimeoutNotNull()
+    {
+        var session = NewSession();
+
+        session.Type((object)"id=x", "hi", options: null);
+
+        // Inspector 요청 타입의 timeout 은 non-nullable int 라, null 을 보내면 역직렬화가 깨진다(실측 회귀).
+        var timeout = _sent[0].Payload.GetValueOrDefault().GetProperty("timeout");
+        Assert.Equal(System.Text.Json.JsonValueKind.Number, timeout.ValueKind);
+        Assert.Equal(5000, timeout.GetInt32());
+    }
+
+    [Fact]
     public void One_WhenNotExactlyOneMatch_Throws()
     {
         _reply = _ => FindReply((1, "Button"), (2, "Button"));

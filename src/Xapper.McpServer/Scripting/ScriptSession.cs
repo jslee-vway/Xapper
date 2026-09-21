@@ -18,6 +18,9 @@ internal sealed class ScriptSession
     #region Fields
 
     private const int TraceCapacity = 5;
+
+    /// <summary>옵션에 timeout 이 없을 때 Inspector 요청에 넣을 기본 제한 시간(ms). Inspector 요청 타입이 non-nullable int 라 null 을 보내면 역직렬화가 깨진다.</summary>
+    private const int DefaultTimeout = 5000;
     private const int SnapshotLimit = 8 * 1024;
 
     private static int _screenshotCounter;
@@ -92,7 +95,7 @@ internal sealed class ScriptSession
     {
         var (@ref, sel) = TargetArgument.Resolve(target);
         var o = Options.From(options);
-        var response = Send("click", new { @ref, target = sel, x = o.X, y = o.Y, modifiers = o.Modifiers, doubleClick = false, timeout = o.Timeout });
+        var response = Send("click", new { @ref, target = sel, x = o.X, y = o.Y, modifiers = o.Modifiers, doubleClick = false, timeout = o.Timeout ?? DefaultTimeout });
         return Finish("click", response, o.AllowFail, $"click {Describe(target)}");
     }
 
@@ -101,7 +104,7 @@ internal sealed class ScriptSession
     {
         var (@ref, sel) = TargetArgument.Resolve(target);
         var o = Options.From(options);
-        var response = Send("click", new { @ref, target = sel, x = o.X ?? 0.5, y = o.Y ?? 0.5, modifiers = o.Modifiers, doubleClick = true, timeout = o.Timeout });
+        var response = Send("click", new { @ref, target = sel, x = o.X ?? 0.5, y = o.Y ?? 0.5, modifiers = o.Modifiers, doubleClick = true, timeout = o.Timeout ?? DefaultTimeout });
         return Finish("doubleClick", response, o.AllowFail, $"doubleClick {Describe(target)}");
     }
 
@@ -110,7 +113,7 @@ internal sealed class ScriptSession
     {
         var (@ref, sel) = TargetArgument.Resolve(target);
         var o = Options.From(options);
-        var response = Send("rightclick", new { @ref, target = sel, x = o.X, y = o.Y, modifiers = o.Modifiers, timeout = o.Timeout });
+        var response = Send("rightclick", new { @ref, target = sel, x = o.X, y = o.Y, modifiers = o.Modifiers, timeout = o.Timeout ?? DefaultTimeout });
         return Finish("rightClick", response, o.AllowFail, $"rightClick {Describe(target)}");
     }
 
@@ -119,7 +122,7 @@ internal sealed class ScriptSession
     {
         var (@ref, sel) = TargetArgument.Resolve(target);
         var o = Options.From(options);
-        var response = Send("wheel", new { @ref, target = sel, notches, x = o.X, y = o.Y, modifiers = o.Modifiers, timeout = o.Timeout });
+        var response = Send("wheel", new { @ref, target = sel, notches, x = o.X, y = o.Y, modifiers = o.Modifiers, timeout = o.Timeout ?? DefaultTimeout });
         return Finish("wheel", response, o.AllowFail, $"wheel {Describe(target)}");
     }
 
@@ -132,7 +135,7 @@ internal sealed class ScriptSession
             throw new ScriptFailure("drag", "drag needs element refs or find() results, not selector strings");
 
         var o = Options.From(options);
-        var response = Send("drag", new { sourceRef = fromRef, targetRef = toRef, modifiers = o.Modifiers, timeout = o.Timeout });
+        var response = Send("drag", new { sourceRef = fromRef, targetRef = toRef, modifiers = o.Modifiers, timeout = o.Timeout ?? DefaultTimeout });
         return Finish("drag", response, o.AllowFail, $"drag {Describe(from)} -> {Describe(to)}");
     }
 
@@ -141,7 +144,7 @@ internal sealed class ScriptSession
     {
         var (@ref, sel) = TargetArgument.Resolve(target);
         var o = Options.From(options);
-        var response = Send("select", new { @ref, target = sel, itemText = o.Text, itemIndex = o.Index, timeout = o.Timeout });
+        var response = Send("select", new { @ref, target = sel, itemText = o.Text, itemIndex = o.Index, timeout = o.Timeout ?? DefaultTimeout });
         return Finish("select", response, o.AllowFail, $"select {Describe(target)}");
     }
 
@@ -149,7 +152,7 @@ internal sealed class ScriptSession
     public string Toggle(object target)
     {
         var (@ref, sel) = TargetArgument.Resolve(target);
-        var response = Send("toggle", new { @ref, target = sel, timeout = (int?)null });
+        var response = Send("toggle", new { @ref, target = sel, timeout = DefaultTimeout });
         return Finish("toggle", response, false, $"toggle {Describe(target)}");
     }
 
@@ -157,7 +160,7 @@ internal sealed class ScriptSession
     public string Expand(object target, bool expand)
     {
         var (@ref, sel) = TargetArgument.Resolve(target);
-        var response = Send("expand", new { @ref, target = sel, expand, timeout = (int?)null });
+        var response = Send("expand", new { @ref, target = sel, expand, timeout = DefaultTimeout });
         return Finish("expand", response, false, $"expand {Describe(target)}");
     }
 
@@ -166,7 +169,7 @@ internal sealed class ScriptSession
     {
         var (@ref, sel) = TargetArgument.Resolve(target);
         var o = Options.From(options);
-        var response = Send("scroll", new { @ref, target = sel, horizontalPercent = o.H ?? -1, verticalPercent = o.V ?? -1, timeout = o.Timeout });
+        var response = Send("scroll", new { @ref, target = sel, horizontalPercent = o.H ?? -1, verticalPercent = o.V ?? -1, timeout = o.Timeout ?? DefaultTimeout });
         return Finish("scroll", response, o.AllowFail, $"scroll {Describe(target)}");
     }
 
@@ -175,7 +178,7 @@ internal sealed class ScriptSession
     {
         var (@ref, sel) = TargetArgument.Resolve(target);
         var o = Options.From(options);
-        var response = Send("type", new { @ref, target = sel, text, clear = o.Clear ?? true, timeout = o.Timeout });
+        var response = Send("type", new { @ref, target = sel, text, clear = o.Clear ?? true, timeout = o.Timeout ?? DefaultTimeout });
         return Finish("type", response, o.AllowFail, $"type {Describe(target)}");
     }
 
@@ -183,7 +186,7 @@ internal sealed class ScriptSession
     public string Key(string keys, JsValue? options)
     {
         var o = Options.From(options);
-        var response = Send("key", new { key = keys, modifiers = o.Modifiers, timeout = o.Timeout });
+        var response = Send("key", new { key = keys, modifiers = o.Modifiers, timeout = o.Timeout ?? DefaultTimeout });
         return Finish("key", response, o.AllowFail, $"key \"{keys}\"");
     }
 
@@ -191,7 +194,7 @@ internal sealed class ScriptSession
     public string KeyOn(int @ref, string keys, JsValue? options)
     {
         var o = Options.From(options);
-        var response = Send("key", new { key = keys, modifiers = o.Modifiers, @ref, timeout = o.Timeout });
+        var response = Send("key", new { key = keys, modifiers = o.Modifiers, @ref, timeout = o.Timeout ?? DefaultTimeout });
         return Finish("key", response, o.AllowFail, $"key \"{keys}\" on ref={@ref}");
     }
 
