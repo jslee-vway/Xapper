@@ -24,11 +24,14 @@ public sealed class SnapshotTools
         "Visual-tree snapshot with a ref per element. It invalidates ALL earlier refs (from find too) and " +
         "renumbers. The root is the window, or a synthetic Application node whenever several top-level " +
         "windows (popups, menus, tooltips) are open - do not key on it. Keep maxDepth small (default 5): " +
-        "responses grow exponentially; to go deeper, pass a container's ref as rootRef.")]
+        "responses grow exponentially; to go deeper, pass a container's ref as rootRef. With " +
+        "addressableOnly the anonymous layout containers are folded away, which is much shorter - raise " +
+        "maxDepth when you use it, because the depth limit applies before the filter.")]
     public async Task<string> Snapshot(
         [Description("Ref to start from, taken from the previous snapshot or from xapper_find (omit for the whole window)")] int? rootRef = null,
         [Description("Max depth to traverse (default 5)")] int maxDepth = 5,
         [Description("Output format: 'text' (compact) or 'json' (structured)")] string format = "text",
+        [Description("Keep only elements a selector can target - those with an id, a name or text. Folds anonymous layout containers away and promotes what is under them")] bool addressableOnly = false,
         CancellationToken ct = default)
     {
         var client = _sessionManager.GetActive();
@@ -39,17 +42,33 @@ public sealed class SnapshotTools
 
         var snapshotResponse = IpcSerializer.DeserializePayload<SnapshotResponse>(response.Payload!.Value);
 
+        var folded = 0;
+        if (addressableOnly)
+        {
+            var (filtered, foldedCount) = SnapshotFilter.KeepAddressable(snapshotResponse.Root);
+            snapshotResponse.Root = filtered;
+            folded = foldedCount;
+        }
+
         return format == "json"
             ? JsonSerializer.Serialize(snapshotResponse, new JsonSerializerOptions { WriteIndented = true })
-            : FormatAsText(snapshotResponse);
+            : FormatAsText(snapshotResponse, folded);
     }
 
-    private static string FormatAsText(SnapshotResponse response)
+    /// <summary>
+    /// 스냅샷을 들여쓴 텍스트로 만듭니다. 머리에 세대 번호와, 트리를 온전히 보여주지 못한 사정(건너뜀·접힘)을 적는다.
+    /// </summary>
+    /// <param name="response">Inspector 가 준 스냅샷.</param>
+    /// <param name="folded">필터가 접어 버린 노드 수. 0이면 적지 않는다.</param>
+    private static string FormatAsText(SnapshotResponse response, int folded)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Generation: {response.Generation}");
         if (response.SkippedNodes.Count > 0)
-            sb.AppendLine($"Skipped: {response.SkippedNodes.Count} unreadable node(s) (use format=\"json\" to see where)");
+            sb.AppendLine($"Skipped: {response.SkippedNodes.Count} node(s) - " +
+                          $"{SkippedNodeSummary.Summarize(response.SkippedNodes)}. Use format=\"json\" for each one.");
+        if (folded > 0)
+            sb.AppendLine($"Folded: {folded} container(s) with no id, name or text.");
         sb.AppendLine();
         FormatElement(sb, response.Root, 0);
         return sb.ToString();
