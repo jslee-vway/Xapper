@@ -82,22 +82,23 @@ internal sealed class ScriptRunner
     /// <summary>엔진을 만들어 스크립트를 실행하고, 성공·실패·타임아웃·문법오류를 결과로 만든다.</summary>
     private ScriptResult Execute(string script, ScriptSession session, CancellationToken runCt, CancellationToken outerCt, Stopwatch stopwatch)
     {
-        var engine = new Engine(options =>
-        {
-            options.CancellationToken(runCt);
-            options.MaxStatements(MaxStatements);
-            options.LimitMemory(MemoryLimitBytes);
-            options.LimitRecursion(RecursionLimit);
-        });
-
-        engine.SetValue("__xapper", session);
-        engine.Execute(XapperShim);
-        engine.SetValue("log", new Action<JsValue>(v => session.Log(Stringify(v))));
-        engine.SetValue("fail", new Action<string>(session.Fail));
-        engine.SetValue("sleep", new Action<int>(session.Sleep));
-
         try
         {
+            // 엔진 준비도 try 안에 둔다 — RunAsync 는 어떤 경우에도 예외를 밖으로 내지 않는다는 계약을 지키기 위함.
+            var engine = new Engine(options =>
+            {
+                options.CancellationToken(runCt);
+                options.MaxStatements(MaxStatements);
+                options.LimitMemory(MemoryLimitBytes);
+                options.LimitRecursion(RecursionLimit);
+            });
+
+            engine.SetValue("__xapper", session);
+            engine.Execute(XapperShim);
+            engine.SetValue("log", new Action<JsValue>(v => session.Log(Stringify(v))));
+            engine.SetValue("fail", new Action<string>(session.Fail));
+            engine.SetValue("sleep", new Action<int>(session.Sleep));
+
             var completion = engine.Evaluate(script);
             stopwatch.Stop();
             return new ScriptResult
