@@ -29,19 +29,31 @@ public sealed class IpcServer
     private readonly TreeWalker _treeWalker = new();
     private CancellationTokenSource? _cts;
 
+    /// <summary>
+    /// 앱이 WPF Application 을 만들 때까지 기다릴 시간. null 이면 기다리지 않는다.
+    /// 주입 경로는 이미 떠 있는 앱에 들어가므로 기다릴 이유가 없고, startup hook 경로만 이 값을 받는다.
+    /// </summary>
+    private readonly TimeSpan? _applicationWait;
+
+    /// <summary>Application 이 생겼는지 다시 묻는 간격.</summary>
+    private static readonly TimeSpan ApplicationWaitPoll = TimeSpan.FromMilliseconds(50);
+
     #endregion
 
     #region Constructor
 
-    /// <summary>
-    /// <see cref="IpcServer"/>의 새 인스턴스를 생성합니다.
-    /// </summary>
-    /// <param name="pipeName">수신 대기할 Named Pipe 이름.</param>
-    /// <param name="log">진단 메시지를 기록할 대상. 주입된 프로세스에서는 이것이 유일한 관찰 통로이다.</param>
-    public IpcServer(string pipeName, Action<string>? log = null)
+    /// <summary><see cref="IpcServer"/>를 만듭니다.</summary>
+    /// <param name="pipeName">수신할 명명 파이프 이름.</param>
+    /// <param name="log">진단 로그 기록기. 없으면 기록하지 않는다.</param>
+    /// <param name="applicationWait">
+    /// 앱이 WPF Application 을 만들기를 기다릴 시간. startup hook 으로 앱의 진입점보다 먼저 들어왔을 때만 준다 —
+    /// 주입 경로는 이미 떠 있는 앱에 들어가므로 null 이다.
+    /// </param>
+    public IpcServer(string pipeName, Action<string>? log = null, TimeSpan? applicationWait = null)
     {
         _pipeName = pipeName;
         _log = log;
+        _applicationWait = applicationWait;
     }
 
     #endregion
@@ -376,6 +388,18 @@ public sealed class IpcServer
     {
         try
         {
+            // startup hook 으로 들어온 경우에만, 앱이 아직 WPF Application 을 만들지 않았을 수 있다. 그 구간을 넘기려고
+            // 요청이 갈라지기 직전 한 번 기다린다. 주입 경로(_applicationWait 가 null)는 이미 떠 있는 앱이라 그냥 지나간다.
+            // ping 은 연결 확인용이라 어느 경우에도 기다리지 않는다.
+            if (_applicationWait is { } wait && message.Method != "ping" && Application.Current is null)
+            {
+                var started = await AutoWait.WaitUntil.ReadyAsync(
+                    () => Application.Current is not null, wait, ApplicationWaitPoll);
+                if (!started)
+                    return IpcSerializer.CreateError(message.Id,
+                        "The app has not created its WPF Application yet - it may still be starting, or it may not be a WPF app.");
+            }
+
             return message.Method switch
             {
                 "ping" => await HandlePing(message),

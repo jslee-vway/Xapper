@@ -14,6 +14,9 @@ public static class EntryPoint
     private static IpcServer? _server;
     private static readonly string LogPath = Path.Combine(Path.GetTempPath(), "xapper_inspector.log");
 
+    /// <summary>startup hook 으로 먼저 들어왔을 때, 앱이 WPF Application 을 만들기를 기다릴 최대 시간.</summary>
+    private static readonly TimeSpan ApplicationWait = TimeSpan.FromSeconds(10);
+
     #endregion
 
     #region Public Methods
@@ -56,7 +59,7 @@ public static class EntryPoint
                 return null;
             };
 
-            StartServer();
+            StartServer(string.Equals(args, "startup-hook", StringComparison.Ordinal));
             return 0;
         }
         catch (Exception ex)
@@ -82,11 +85,14 @@ public static class EntryPoint
     /// IPC 서버를 백그라운드 태스크에서 시작합니다.
     /// Protocol 타입이 어셈블리 리졸버 등록 후에 JIT 리졸브되도록 별도 메서드로 분리.
     /// </summary>
-    private static void StartServer()
+    /// <param name="startedBeforeApp">
+    /// startup hook 으로 앱의 진입점보다 먼저 기동했는지. 그 경우에만 서버가 WPF Application 을 기다린다.
+    /// </param>
+    private static void StartServer(bool startedBeforeApp)
     {
         var pipeName = Protocol.IpcPipeNames.ForProcess(Environment.ProcessId);
-        Log($"Starting server on pipe: {pipeName}");
-        _server = new IpcServer(pipeName, Log);
+        Log($"Starting server on pipe: {pipeName} (startedBeforeApp={startedBeforeApp})");
+        _server = new IpcServer(pipeName, Log, startedBeforeApp ? ApplicationWait : null);
         _ = Task.Run(async () =>
         {
             try
