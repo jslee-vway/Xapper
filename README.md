@@ -97,7 +97,7 @@ src/
 ├── Xapper.Protocol        IPC 메시지 계약 (net6.0~9.0-windows, WPF 무의존)
 ├── Xapper.Injector        네이티브 인젝터 (P/Invoke로 DLL 주입)
 ├── Xapper.Inspector       인젝션 라이브러리 (net6.0~9.0-windows 멀티타겟)
-└── Xapper.McpServer       MCP 서버 (stdio transport, 24개 도구)
+└── Xapper.McpServer       MCP 서버 (stdio transport, 25개 도구)
 tests/
 ├── Xapper.TestApp         샘플 WPF 로그인 폼
 └── Xapper.Tests           단위 테스트 (xUnit)
@@ -150,6 +150,7 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 - `xapper_type` : 텍스트 입력. 접근성 Value 패턴이나 `TextBox.Text` 로 값을 넣고, 둘 다 없는 편집기(RichTextBox·그리드 셀 편집기·DevExpress 편집기)에는 포커스를 준 뒤 실제 키 입력으로 타이핑한다. `ref` 를 생략하면 현재 키보드 포커스 요소에 키 입력으로 타이핑한다(F2·더블클릭으로 연 인라인 편집기처럼 스냅샷에 아직 없는 편집기). 글자 그대로 들어가며, 여러 글자는 항상 이 도구로(글자마다 `xapper_key` 를 부르지 않는다)
 - `xapper_key` : 대상 프로세스 안에서 키 입력(F2/Enter/Escape/Tab/화살표/한 글자, 또는 `"qwerty"` 같은 문자열을 한 호출에 글자별 키 입력으로). 전경 창과 무관하게 대상 앱의 키보드 포커스 요소로 라우팅하므로, 사용자가 앞 창에서 딴 일을 해도 키가 새지 않는다. ref 를 주면 먼저 그 요소에 포커스. 수식키(`modifiers`: Ctrl/Shift/Alt, `Ctrl+Shift` 조합)를 지원 — 대상 프로세스 안에서 GetKeyState 를 스푸프해 WPF 가 눌린 것으로 보게 하며(Ctrl+Z 등), 후크를 걸 수 없으면 오류로 안내한다. 편집기가 키(F2)로만 열리는 컨트롤에 쓴다
 - `xapper_notice_show` / `xapper_notice_hide` : 대상 앱 창 위쪽에 "Xapper 조작중" 알림을 올리고 내린다. 실제 마우스 입력(폴백)이 예상되는 구간 앞에 올려 책상 앞 사람이 마우스가 저절로 움직이는 것을 보고 놀라지 않게 한다. 알림 창은 MCP 서버 프로세스가 띄우며 포커스를 가져가지 않고 클릭이 통과한다(스냅샷·검색에도 안 잡힘). 알림이 내려간 채 조작이 실제 마우스로 떨어지면 서버가 자동으로 올리고 응답에 알린다. detach 하면 내려간다. 한계: `xapper_screenshot mode="screen"` 에는 알림이 찍힐 수 있다
+- `xapper_run` : 여러 조작을 담은 JavaScript 를 한 번에 실행한다. 반복·조건·대기·단언을 서버 안에서 처리해 도구를 하나씩 부를 때의 왕복을 없앤다. 전역 `xapper` 로 find/one/click/doubleClick/rightClick/wheel/drag/type/key/select/toggle/expand/scroll/get/assert/waitUntil/screenshot/snapshot/notice 를, `log`/`fail`/`sleep` 도 쓴다. 대상은 셀렉터 문자열(`id=`/`name=`/`text=`/`type=`, 콤마 AND)·ref 숫자·find 결과 요소. 실패한 조작은 예외로 스크립트를 멈추고 응답에 실패 줄·짧은 추적·스크린샷 경로를 준다. 성공은 요약과 return 값만. 3개 이상 연속 조작이나 반복이 있으면 이걸 쓴다(예: `xapper.type("id=User","t"); xapper.click("text=로그인"); xapper.waitUntil("id=Main"); return xapper.get("id=Status","Text");`)
 - `xapper_select` : ComboBox/ListBox 항목 선택
 - `xapper_toggle` : CheckBox/ToggleButton 토글
 - `xapper_expand` : TreeViewItem/Expander 펼치기/접기
