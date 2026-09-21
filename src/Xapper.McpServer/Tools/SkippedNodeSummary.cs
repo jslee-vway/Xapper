@@ -51,14 +51,19 @@ internal static class SkippedNodeSummary
         var count = group.Count();
         var detail = new List<string>();
 
-        var type = group
+        var types = group
             .Where(entry => entry.ParentType.Length > 0)
             .GroupBy(entry => entry.ParentType, StringComparer.Ordinal)
             .OrderByDescending(byType => byType.Count())
             .ThenBy(byType => byType.Key, StringComparer.Ordinal)
-            .FirstOrDefault();
-        if (type is not null)
-            detail.Add($"under {type.Key}");
+            .ToList();
+        if (types.Count > 0)
+        {
+            // 가장 흔한 부모만 이름을 적되, 다른 부모가 더 있으면 그 사실을 숨기지 않는다 —
+            // 하나만 적어 두면 호출자가 전부 그 부모 아래라고 읽고 엉뚱한 컨테이너를 뒤진다.
+            var others = types.Count - 1;
+            detail.Add(others > 0 ? $"under {types[0].Key} +{others} more type(s)" : $"under {types[0].Key}");
+        }
 
         var depths = group.Where(entry => entry.Depth.HasValue).Select(entry => entry.Depth).ToList();
         if (depths.Count > 0)

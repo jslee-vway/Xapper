@@ -79,6 +79,22 @@ public class SkippedNodeSummaryTests
     }
 
     [Fact]
+    public void Summarize_SaysSoWhenTheSameReasonCameFromSeveralParentTypes()
+    {
+        var lines = new[]
+        {
+            "VirtualizingStackPanel depth=6: child slot was empty",
+            "VirtualizingStackPanel depth=7: child slot was empty",
+            "ItemsPresenter depth=9: child slot was empty"
+        };
+
+        var summary = SkippedNodeSummary.Summarize(lines);
+
+        // 가장 흔한 부모만 적고 말면 호출자가 셋 다 그 아래라고 읽는다.
+        Assert.Contains("under VirtualizingStackPanel +1 more type(s)", summary);
+    }
+
+    [Fact]
     public void Summarize_OfNothingIsEmpty()
     {
         Assert.Equal("", SkippedNodeSummary.Summarize(Array.Empty<string>()));
