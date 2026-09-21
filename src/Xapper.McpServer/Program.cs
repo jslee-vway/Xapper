@@ -69,6 +69,11 @@ var serverInstructions = """
     keeps their hands off, and xapper_notice_hide when that stretch of work is over. If an action drives the real
     mouse while the banner is down, the server raises it for you and says so in the response; you still hide it.
 
+    For any stretch of three or more actions, or anything with a loop, a condition, or a wait, send one
+    xapper_run script instead of calling tools one at a time - it runs entirely in the app and returns only a
+    summary. Explore first with find/snapshot, then drive with a script. Prefer id/name selectors and waitUntil
+    over sleep, so the same script can be re-run.
+
     Attach first: xapper_list_processes, then xapper_attach. Attaching again to a process you are already
     attached to is rejected, but the rejection surfaces only after the injection attempt, as a connect
     failure - so detach before re-attaching rather than retrying.
@@ -107,7 +112,8 @@ builder.Services.AddMcpServer(options =>
 .WithTools<CaptureTools>()
 .WithTools<FindTools>()
 .WithTools<BatchTools>()
-.WithTools<NoticeTools>();
+.WithTools<NoticeTools>()
+.WithTools<RunTools>();
 
 var app = builder.Build();
 await app.RunAsync();
