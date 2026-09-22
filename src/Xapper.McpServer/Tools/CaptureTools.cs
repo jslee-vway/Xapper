@@ -56,7 +56,7 @@ public sealed class CaptureTools
         [Description("Shrink to at most this many pixels wide, keeping the aspect ratio (omit for full size)")] int? maxWidth = null,
         [Description("Absolute path to also write the PNG to (omit to skip saving)")] string? savePath = null,
         [Description("Where the pixels come from: 'render' (default, redraws the app) or 'screen' (reads the desktop, includes popups)")] string mode = "render",
-        [Description("Draw numbered boxes on the elements a click can reach and list each number's ref. Turns one screenshot into refs you can act on, instead of following up with xapper_element_at. Render mode only")] bool annotate = false,
+        [Description("Draw numbered boxes on the elements a click can reach and list each number's ref. Turns one screenshot into refs you can act on, instead of following up with xapper_element_at. An element no selector can reach also gets an anchor ('in id=X at 0.45,0.2'), which still works in a later session when the ref does not. Render mode only")] bool annotate = false,
         CancellationToken ct = default)
     {
         if (maxWidth is <= 0)

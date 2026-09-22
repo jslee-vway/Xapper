@@ -35,6 +35,19 @@ public class ScreenMarkSummaryTests
     }
 
     [Fact]
+    public void Describe_ShowsTheAnchorSoTheElementCanBeReachedAgainLater()
+    {
+        var marks = new List<ScreenMark>
+        {
+            new() { Number = 3, Ref = 8, Type = "Grid", Anchor = "id=LoginPanel", AnchorX = 0.5, AnchorY = 0.72 }
+        };
+
+        var summary = ScreenMarkSummary.Describe(marks, omitted: 0);
+
+        Assert.Contains("3: Grid in id=LoginPanel at 0.5,0.72 ref=8", summary);
+    }
+
+    [Fact]
     public void Describe_SaysHowManyWereLeftOut()
     {
         var marks = new List<ScreenMark> { new() { Number = 1, Ref = 1, Type = "Button" } };

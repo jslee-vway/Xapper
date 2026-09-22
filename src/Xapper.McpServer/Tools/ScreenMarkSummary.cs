@@ -26,6 +26,12 @@ internal static class ScreenMarkSummary
             if (!string.IsNullOrEmpty(mark.Name)) parts.Add($"name=\"{mark.Name}\"");
             if (!string.IsNullOrEmpty(mark.AutomationId)) parts.Add($"id=\"{mark.AutomationId}\"");
             if (!string.IsNullOrEmpty(mark.Text)) parts.Add($"text=\"{Shorten(mark.Text)}\"");
+
+            // 기준점은 ref 와 성격이 다르다. ref 는 이번 세션에서만 유효하고 기준점은 세션을 넘어 유효하므로,
+            // 둘을 함께 보여 주어야 호출자가 어느 쪽을 적어 둘지 판단할 수 있다.
+            if (!string.IsNullOrEmpty(mark.Anchor) && mark.AnchorX is { } x && mark.AnchorY is { } y)
+                parts.Add($"in {mark.Anchor} at {x:0.###},{y:0.###}");
+
             parts.Add($"ref={mark.Ref}");
 
             sb.AppendLine(" " + string.Join(" ", parts));

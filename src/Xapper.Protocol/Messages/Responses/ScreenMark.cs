@@ -22,4 +22,16 @@ public sealed class ScreenMark
 
     /// <summary>표시 텍스트. 없으면 null.</summary>
     public string? Text { get; set; }
+
+    /// <summary>
+    /// 세션을 넘겨 이 요소에 다시 닿기 위한 기준점 셀렉터("id=…" 또는 "name=…").
+    /// 요소 스스로 셀렉터로 지목될 수 있으면 null 이다. ref 는 이번 세션에서만 유효하지만 이것은 남는다.
+    /// </summary>
+    public string? Anchor { get; set; }
+
+    /// <summary>기준점 안에서 이 요소 중심의 가로 비율(0.0~1.0). 기준점이 없으면 null.</summary>
+    public double? AnchorX { get; set; }
+
+    /// <summary>기준점 안에서 이 요소 중심의 세로 비율(0.0~1.0). 기준점이 없으면 null.</summary>
+    public double? AnchorY { get; set; }
 }

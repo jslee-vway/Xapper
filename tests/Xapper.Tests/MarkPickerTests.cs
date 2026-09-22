@@ -174,6 +174,74 @@ public class MarkPickerTests
     }
 
     [Fact]
+    public void Pick_GivesNoAnchorToAnElementASelectorCanAlreadyReach()
+    {
+        StaThread.Run(() =>
+        {
+            var named = Box(10, 10, 80, 40);
+            named.SetValue(System.Windows.Automation.AutomationProperties.AutomationIdProperty, "SaveButton");
+            var canvas = BuildCanvas(named);
+
+            var mark = Assert.Single(Pick(canvas), candidate => ReferenceEquals(candidate.Element, named));
+
+            // id 가 있으면 셀렉터로 닿으므로 좌표를 붙일 이유가 없다.
+            Assert.Null(mark.Anchor);
+            Assert.Null(mark.AnchorX);
+        });
+    }
+
+    [Fact]
+    public void Pick_AnchorsANamelessElementToItsNearestUniqueAncestor()
+    {
+        StaThread.Run(() =>
+        {
+            var nameless = new Border { Width = 40, Height = 20, Background = Brushes.SteelBlue };
+            var panel = new Canvas { Width = 200, Height = 100, Background = Brushes.WhiteSmoke };
+            panel.SetValue(System.Windows.Automation.AutomationProperties.AutomationIdProperty, "LoginPanel");
+            Canvas.SetLeft(nameless, 80);
+            Canvas.SetTop(nameless, 40);
+            panel.Children.Add(nameless);
+            Canvas.SetLeft(panel, 0);
+            Canvas.SetTop(panel, 0);
+            var canvas = BuildCanvas(panel);
+
+            var mark = Assert.Single(Pick(canvas), candidate => ReferenceEquals(candidate.Element, nameless));
+
+            Assert.Equal("id=LoginPanel", mark.Anchor);
+            // 상자 중심은 패널 안에서 가로 (80+20)/200 = 0.5, 세로 (40+10)/100 = 0.5 이다.
+            Assert.NotNull(mark.AnchorX);
+            Assert.Equal(0.5, mark.AnchorX.Value, precision: 2);
+            Assert.Equal(0.5, mark.AnchorY.Value, precision: 2);
+        });
+    }
+
+    [Fact]
+    public void Pick_RefusesAnAnchorWhoseIdIsNotUnique()
+    {
+        StaThread.Run(() =>
+        {
+            // 같은 id 가 둘이면 target 셀렉터가 실행을 거부하므로, 기준점으로 저장해서는 안 된다.
+            var nameless = new Border { Width = 40, Height = 20, Background = Brushes.SteelBlue };
+            var panel = new Canvas { Width = 200, Height = 100, Background = Brushes.WhiteSmoke };
+            panel.SetValue(System.Windows.Automation.AutomationProperties.AutomationIdProperty, "Twin");
+            Canvas.SetLeft(nameless, 80);
+            Canvas.SetTop(nameless, 40);
+            panel.Children.Add(nameless);
+
+            var twin = new Canvas { Width = 60, Height = 40, Background = Brushes.WhiteSmoke };
+            twin.SetValue(System.Windows.Automation.AutomationProperties.AutomationIdProperty, "Twin");
+            Canvas.SetLeft(twin, 220);
+            Canvas.SetTop(twin, 10);
+
+            var canvas = BuildCanvas(panel, twin);
+
+            var mark = Assert.Single(Pick(canvas), candidate => ReferenceEquals(candidate.Element, nameless));
+
+            Assert.Null(mark.Anchor);
+        });
+    }
+
+    [Fact]
     public void Pick_NumbersMarksFromOneInOrder()
     {
         StaThread.Run(() =>

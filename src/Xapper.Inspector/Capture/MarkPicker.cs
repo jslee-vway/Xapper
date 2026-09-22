@@ -9,7 +9,14 @@ namespace Xapper.Inspector.Capture;
 /// <param name="Number">그림에 그릴 번호. 1부터 센다.</param>
 /// <param name="Element">상자를 받을 요소.</param>
 /// <param name="Rect">캡처 대상 좌표계에서의 사각형.</param>
-public sealed record MarkCandidate(int Number, UIElement Element, Rect Rect);
+/// <param name="Anchor">
+/// 세션을 넘겨 이 요소에 다시 닿기 위한 기준점 셀렉터("id=…" 또는 "name=…").
+/// 요소 스스로 셀렉터로 지목될 수 있으면 null 이다. 그때는 좌표가 필요 없다.
+/// </param>
+/// <param name="AnchorX">기준점 안에서 상자 중심의 가로 비율(0.0~1.0). 기준점이 없으면 null.</param>
+/// <param name="AnchorY">기준점 안에서 상자 중심의 세로 비율(0.0~1.0). 기준점이 없으면 null.</param>
+public sealed record MarkCandidate(
+    int Number, UIElement Element, Rect Rect, string? Anchor = null, double? AnchorX = null, double? AnchorY = null);
 
 /// <summary>
 /// annotate 스크린샷에서 번호 상자를 받을 요소를 고른다.
@@ -46,7 +53,12 @@ public static class MarkPicker
         UIElement captured, Rect bounds, int maxMarks, double minSize, out int omitted)
     {
         var reachable = new List<(UIElement Element, Rect Rect)>();
-        Collect(captured, captured, bounds, minSize, reachable);
+
+        // 기준점은 target 셀렉터로 쓰이는데, 그 셀렉터는 정확히 하나 맞을 때만 실행된다. 그래서 유일한
+        // id·name 만 기준점이 될 수 있다. 트리를 훑는 김에 세어 두면 기준점마다 다시 훑지 않아도 된다.
+        var idCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var nameCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        Collect(captured, captured, bounds, minSize, reachable, idCounts, nameCounts);
 
         // 컨테이너 판정은 후보끼리 서로 견주므로 개수의 제곱에 비례한다. 셀이 수천 개인 그리드 화면에서는
         // 그것만으로 대상 앱의 UI 스레드가 1초 가까이 멎는다(측정: 후보 5000개에 763ms). 어차피 상한만큼만
@@ -68,7 +80,11 @@ public static class MarkPicker
 
         var marks = new List<MarkCandidate>(kept.Count);
         for (var index = 0; index < kept.Count; index++)
-            marks.Add(new MarkCandidate(index + 1, kept[index].Element, kept[index].Rect));
+        {
+            var entry = kept[index];
+            var (anchor, anchorX, anchorY) = AnchorFor(entry.Element, entry.Rect, captured, idCounts, nameCounts);
+            marks.Add(new MarkCandidate(index + 1, entry.Element, entry.Rect, anchor, anchorX, anchorY));
+        }
 
         return marks;
     }
@@ -76,6 +92,108 @@ public static class MarkPicker
     #endregion
 
     #region Private Methods
+
+    /// <summary>
+    /// 세션을 넘겨 이 요소에 다시 닿을 기준점을 정합니다.
+    /// 요소 스스로 id·name·text 중 하나라도 있으면 셀렉터로 충분하므로 기준점을 붙이지 않는다.
+    /// 그렇지 않으면 위로 올라가며 유일한 id 를, 없으면 유일한 name 을 가진 가장 가까운 조상을 찾는다.
+    /// 텍스트는 데이터에 따라 바뀌어 기준으로 삼기 약하므로 쓰지 않는다.
+    /// </summary>
+    private static (string? Anchor, double? X, double? Y) AnchorFor(
+        UIElement element, Rect rect, UIElement captured,
+        Dictionary<string, int> idCounts, Dictionary<string, int> nameCounts)
+    {
+        if (IsAddressableItself(element))
+            return (null, null, null);
+
+        for (DependencyObject? node = VisualParentOf(element); node is not null; node = VisualParentOf(node))
+        {
+            if (node is not UIElement ancestor)
+                continue;
+
+            var selector = SelectorFor(ancestor, idCounts, nameCounts);
+            if (selector is null)
+            {
+                if (ReferenceEquals(node, captured))
+                    break;
+                continue;
+            }
+
+            var anchorRect = ReferenceEquals(ancestor, captured)
+                ? new Rect(captured.RenderSize)
+                : RectOf(ancestor, captured);
+            if (anchorRect is not { Width: > 0, Height: > 0 } box)
+                return (null, null, null);
+
+            var x = Ratio(rect.X + rect.Width / 2 - box.X, box.Width);
+            var y = Ratio(rect.Y + rect.Height / 2 - box.Y, box.Height);
+            return (selector, x, y);
+        }
+
+        return (null, null, null);
+    }
+
+    /// <summary>요소 스스로 target 셀렉터로 지목될 수 있는지.</summary>
+    private static bool IsAddressableItself(UIElement element)
+    {
+        return !string.IsNullOrEmpty(IdOf(element))
+            || !string.IsNullOrEmpty(NameOf(element))
+            || !string.IsNullOrEmpty(VisualTree.ElementText.Of(element));
+    }
+
+    /// <summary>이 요소를 유일하게 가리키는 셀렉터. 유일하지 않거나 없으면 null.</summary>
+    private static string? SelectorFor(
+        UIElement element, Dictionary<string, int> idCounts, Dictionary<string, int> nameCounts)
+    {
+        var id = IdOf(element);
+        if (!string.IsNullOrEmpty(id) && idCounts.TryGetValue(id, out var ids) && ids == 1)
+            return $"id={id}";
+
+        var name = NameOf(element);
+        if (!string.IsNullOrEmpty(name) && nameCounts.TryGetValue(name, out var names) && names == 1)
+            return $"name={name}";
+
+        return null;
+    }
+
+    /// <summary>비율을 0.0~1.0 으로 자릅니다. 기준 사각형 밖으로 나간 중심점을 그대로 쓰면 조작이 빗나간다.</summary>
+    private static double Ratio(double offset, double length)
+        => Math.Round(Math.Clamp(offset / length, 0, 1), 3);
+
+    /// <summary>AutomationId. 읽을 수 없으면 빈 문자열.</summary>
+    private static string IdOf(UIElement element)
+    {
+        try
+        {
+            return System.Windows.Automation.AutomationProperties.GetAutomationId(element) ?? "";
+        }
+        catch (Exception)
+        {
+            return "";
+        }
+    }
+
+    /// <summary>FrameworkElement.Name. 읽을 수 없으면 빈 문자열.</summary>
+    private static string NameOf(UIElement element)
+    {
+        try
+        {
+            return (element as FrameworkElement)?.Name ?? "";
+        }
+        catch (Exception)
+        {
+            return "";
+        }
+    }
+
+    /// <summary>값이 있으면 출현 횟수를 하나 올립니다.</summary>
+    private static void Count(string value, Dictionary<string, int> counts)
+    {
+        if (value.Length == 0)
+            return;
+
+        counts[value] = counts.TryGetValue(value, out var seen) ? seen + 1 : 1;
+    }
 
     /// <summary>
     /// 같은 자리를 차지하는 후보를 하나만 남깁니다.
@@ -120,10 +238,14 @@ public static class MarkPicker
     /// </summary>
     private static void Collect(
         DependencyObject node, UIElement captured, Rect bounds, double minSize,
-        List<(UIElement Element, Rect Rect)> reachable)
+        List<(UIElement Element, Rect Rect)> reachable,
+        Dictionary<string, int> idCounts, Dictionary<string, int> nameCounts)
     {
         if (node is UIElement element)
         {
+            Count(IdOf(element), idCounts);
+            Count(NameOf(element), nameCounts);
+
             // 화면에 붙지 않은 트리에서는 IsVisible 이 거짓이므로 Visibility 로 판정한다.
             // 위에서 아래로 훑기 때문에 조상이 숨어 있으면 그 가지에 아예 들어오지 않는다.
             if (element.Visibility != Visibility.Visible)
@@ -141,7 +263,7 @@ public static class MarkPicker
         }
 
         foreach (var child in VisualChildrenOf(node))
-            Collect(child, captured, bounds, minSize, reachable);
+            Collect(child, captured, bounds, minSize, reachable, idCounts, nameCounts);
     }
 
     /// <summary>캡처 대상 좌표계에서의 사각형. 변환할 수 없으면 null.</summary>

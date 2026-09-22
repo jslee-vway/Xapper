@@ -1254,7 +1254,10 @@ public sealed class IpcServer
                 Type = candidate.Element.GetType().Name,
                 Name = (candidate.Element as FrameworkElement)?.Name is { Length: > 0 } name ? name : null,
                 AutomationId = System.Windows.Automation.AutomationProperties.GetAutomationId(candidate.Element),
-                Text = VisualTree.ElementText.Of(candidate.Element)
+                Text = VisualTree.ElementText.Of(candidate.Element),
+                Anchor = candidate.Anchor,
+                AnchorX = candidate.AnchorX,
+                AnchorY = candidate.AnchorY
             });
         }
 
