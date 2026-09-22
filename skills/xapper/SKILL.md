@@ -30,6 +30,13 @@ each is a new screen with its own record.
 A known screen comes back with the selectors to act on, and you can work without looking at all.
 An unknown screen is the signal to look once, and only once.
 
+A known screen is also the moment to stop moving one step at a time. You already hold every
+selector the screen offers, so plan the whole sequence up front - click this, type that, press
+Enter - and send it in a single call instead of looking between each step. Build those steps from
+the record's selectors rather than from refs: a selector still resolves on a later visit and in a
+later session, while a ref does not survive the next snapshot. That is what a learned screen buys
+you, and it is worth more than the picture you saved.
+
 ## 3. Act, and read the response
 
 Every action reports which path it took and what happened. Read that instead of taking a picture to
@@ -43,9 +50,15 @@ find out. When an action refuses, the message names the single condition that bl
 | `cannot be resolved` | the ref is stale | `xapper_snapshot` discards every earlier ref; take fresh ones. `xapper_find` does not discard |
 | `matches N elements` | the selector is ambiguous | add a second clause, or pass a ref |
 
-For any stretch of three or more actions, or anything with a loop, a condition or a wait, send one
-`xapper_run` script instead of calling tools one at a time. It runs entirely inside the app and
-returns a summary.
+Send a sequence as one call rather than one tool call per step, and check the result once at the
+end rather than between steps. Two tools do this:
+
+- **`xapper_batch`** for a straight line of steps. They run in order, the batch stops at the first
+  failure, and you get one numbered result per step in the format the single tools return. Steps
+  take target selectors, so a whole flow runs without a snapshot in between. A step that opens a
+  modal dialog ends the batch, and the remaining steps do not run.
+- **`xapper_run`** when there is a loop, a condition or a wait. The script runs entirely inside the
+  app and returns a summary. Prefer `waitUntil` over sleeping, so the same script can be re-run.
 
 ## 4. Verify without pixels
 
@@ -71,7 +84,8 @@ This is the step that gets skipped, and it is the one that pays.
 **`xapper_screen_learn` once per screen.** Do it immediately after you have looked at an unknown
 screen and understood it. You supply only a one-line name and any gotcha; Xapper works out the
 regions itself from the live visual tree. From then on, `xapper_screen_recall` hands you those
-selectors for a fraction of what a picture costs, in this session and in every later one.
+selectors for a fraction of what a picture costs, in this session and in every later one - and
+those selectors are what let you batch a whole flow instead of stepping through it.
 
 **`xapper_screen_note` whenever you find something out.** Most of what is worth remembering is not
 visible on arrival - it surfaces when you act:
