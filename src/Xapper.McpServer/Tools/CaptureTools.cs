@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using Xapper.McpServer.Infrastructure;
 using Xapper.Protocol;
 using Xapper.Protocol.Messages.Responses;
 
@@ -17,6 +18,7 @@ public sealed class CaptureTools
     #region Fields
 
     private readonly SessionManager _sessionManager;
+    private readonly ScreenStore _store;
 
     #endregion
 
@@ -26,9 +28,11 @@ public sealed class CaptureTools
     /// <see cref="CaptureTools"/>의 새 인스턴스를 생성합니다.
     /// </summary>
     /// <param name="sessionManager">활성 Inspector 세션을 제공하는 세션 관리자.</param>
-    public CaptureTools(SessionManager sessionManager)
+    /// <param name="store">화면 기록이 사는 저장소. 이미 배워 둔 화면이면 그림 대신 기록을 내주기 위해 본다.</param>
+    public CaptureTools(SessionManager sessionManager, ScreenStore store)
     {
         _sessionManager = sessionManager;
+        _store = store;
     }
 
     #endregion
@@ -49,7 +53,9 @@ public sealed class CaptureTools
         "works while covered or unfocused but omits other windows (dialogs, popups, menus). mode=\"screen\" " +
         "reads the desktop pixels: shows dialogs and popups but also anything on top (the response warns about other " +
         "open windows or the app not being in front). Images cost many tokens, so reach for one only when you need " +
-        "to see how something is drawn. To read what a panel or a grid currently holds, call xapper_snapshot with " +
+        "to see how something is drawn. On a screen you have already learned, xapper_screen_recall hands you the " +
+        "same selectors a picture would - and asking for annotate there returns the record instead of an image. " +
+        "Every response says whether this screen is in the record, so learn it right after you have looked. To read what a panel or a grid currently holds, call xapper_snapshot with " +
         "rootRef set to it: that returns the same content as text for a fraction of the cost. To check one value, " +
         "call xapper_get_property or xapper_assert. When you do take a picture, narrow it with ref instead of " +
         "capturing the whole window at full size - ref narrows both modes, so choosing screen to catch a dialog " +
@@ -73,6 +79,14 @@ public sealed class CaptureTools
             return [new TextContentBlock { Text = $"Error: {response.Payload}" }];
 
         var result = IpcSerializer.DeserializePayload<ScreenshotResponse>(response.Payload!.Value);
+        var known = result.Signature is { } signature ? _store.Find(signature) : null;
+        var learned = known is not null && known.Regions.Any(region => !string.IsNullOrWhiteSpace(region.Selector));
+
+        // annotate 로 얻으려는 것은 그림 자체가 아니라 "눌러 쓸 수 있는 목록" 이다. 이미 배워 둔 화면이면
+        // 기록이 바로 그 목록이므로, 같은 것을 그림으로 한 번 더 받을 이유가 없다.
+        if (annotate && learned && known is not null)
+            return [new TextContentBlock { Text = InsteadOfAnnotating(known) }];
+
         var png = Convert.FromBase64String(result.Base64Png);
 
         var summary = $"Screenshot captured: {result.Width}x{result.Height} pixels";
@@ -83,6 +97,8 @@ public sealed class CaptureTools
         var markList = ScreenMarkSummary.Describe(result.Marks, result.MarksOmitted);
         if (markList.Length > 0)
             summary += "\n" + markList;
+
+        summary += RecordHint(known, learned);
 
         if (result.Warning is not null)
             summary += $"\nWARNING: {result.Warning}";
@@ -99,6 +115,41 @@ public sealed class CaptureTools
     #endregion
 
     #region Private Methods
+
+    /// <summary>
+    /// 이미 배워 둔 화면에서 annotate 를 요청했을 때, 그림 대신 내줄 문장을 만듭니다.
+    /// annotate 가 하는 일과 기록이 하는 일이 같기 때문에 바꿔치기해도 잃는 정보가 없다.
+    /// 다만 그리드 내용처럼 픽셀로만 확인되는 것도 있으므로 그림으로 가는 길을 함께 알려 준다.
+    /// </summary>
+    /// <param name="record">지금 화면의 기록.</param>
+    private static string InsteadOfAnnotating(ScreenRecord record)
+    {
+        return ScreenRecallSummary.Known(record) +
+               "\n\nThe image was skipped because this screen is already learned, and the record above says the " +
+               "same thing for a fraction of the tokens. Call again without annotate when you need the pixels " +
+               "themselves - what a grid currently holds, or how something is drawn.";
+    }
+
+    /// <summary>
+    /// 이 화면이 기록에 있는지를 한 줄로 덧붙입니다.
+    /// 그림을 받아 드는 순간이 배우기에 가장 좋은 시점인데, 지침에만 적어 두면 그 순간에 떠오르지 않는다
+    /// (실측: 46장을 찍는 동안 학습이 한 번도 일어나지 않았다). 그래서 사실을 그림에 딸려 보낸다.
+    /// </summary>
+    /// <param name="record">지금 화면의 기록. 없으면 null.</param>
+    /// <param name="learned">기록에 셀렉터로 지목되는 영역이 하나라도 있으면 true.</param>
+    private static string RecordHint(ScreenRecord? record, bool learned)
+    {
+        if (learned && record is not null)
+            return $"\nThis screen is already learned as \"{record.Name}\". Call xapper_screen_recall for its " +
+                   "selectors instead of looking again, and xapper_screen_note to record what you have just found out.";
+
+        if (record is not null)
+            return "\nThis screen has a record, but nothing in it a selector can reach. Once you understand the " +
+                   "screen, call xapper_screen_learn to replace it.";
+
+        return "\nThis screen is not in the record yet. Once you understand it, call xapper_screen_learn so the " +
+               "next visit needs no picture.";
+    }
 
     /// <summary>
     /// 그림의 픽셀을 화면 좌표로 되돌리는 방법을 설명합니다.

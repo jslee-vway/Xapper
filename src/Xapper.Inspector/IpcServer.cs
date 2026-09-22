@@ -1244,9 +1244,19 @@ public sealed class IpcServer
                 $"annotate works with mode=\"{ScreenshotModes.Render}\" only. Popups and menus live in their own " +
                 "top-level windows, so xapper_find and xapper_snapshot already list them.");
 
-        var response = await Application.Current.Dispatcher.InvokeAsync(() => isScreen
-            ? CaptureFromScreen(target, request.MaxWidth)
-            : CaptureByRendering(target, request.MaxWidth, request.Annotate));
+        var response = await Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            var captured = isScreen
+                ? CaptureFromScreen(target, request.MaxWidth)
+                : CaptureByRendering(target, request.MaxWidth, request.Annotate);
+
+            // 그림과 같은 걸음에 지문을 담는다. 부르는 쪽이 화면 기록을 따로 조회하지 않아도 이 화면을
+            // 이미 배워 두었는지 알 수 있고, 지문과 픽셀이 같은 순간의 것이라는 점도 보장된다.
+            if (Application.Current.MainWindow is { } main)
+                captured.Signature = VisualTree.ScreenSignature.Of(main);
+
+            return captured;
+        });
 
         return IpcSerializer.CreateResponse(message.Id, response);
     }

@@ -31,4 +31,11 @@ public sealed class ScreenshotResponse
 
     /// <summary>상한을 넘어 그리지 않은 요소 수. 없으면 0.</summary>
     public int MarksOmitted { get; set; }
+
+    /// <summary>
+    /// 이 그림을 찍은 순간 주 창이 보이던 화면의 지문.
+    /// 그림과 같은 호출에 실어 보내는 이유는, 부르는 쪽이 이 화면을 이미 배워 두었는지 따로 물어보지 않고도
+    /// 알 수 있게 하기 위해서다. 구할 수 없으면 null.
+    /// </summary>
+    public string? Signature { get; set; }
 }

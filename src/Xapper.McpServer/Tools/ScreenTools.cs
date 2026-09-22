@@ -76,9 +76,18 @@ public sealed class ScreenTools
         _tracker.LastSignature = profile.Signature;
 
         var record = _store.Find(profile.Signature);
-        return record is null
-            ? ScreenRecallSummary.Unknown(profile.Signature, changed)
-            : ScreenRecallSummary.Known(record);
+        if (record is null)
+            return ScreenRecallSummary.Unknown(profile.Signature, changed);
+
+        // 셀렉터가 하나도 없는 영역 묶음은 다시 방문해도 쓸 데가 없으면서 응답만 채운다. 이 자리에서 덜어내면
+        // 다음 조회는 깨끗해지고, 다시 배우라는 안내가 묻히지 않는다. 비고는 값이 있으므로 그대로 둔다.
+        if (record.Regions.Count > 0 && !record.Regions.Any(region => !string.IsNullOrWhiteSpace(region.Selector)))
+        {
+            _store.DropRegions(record.Signature);
+            record.Regions.Clear();
+        }
+
+        return ScreenRecallSummary.Known(record);
     }
 
     /// <summary>현재 화면을 이름과 메모와 함께 기록합니다.</summary>

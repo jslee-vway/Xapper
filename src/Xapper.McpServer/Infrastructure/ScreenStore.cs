@@ -171,6 +171,22 @@ public sealed class ScreenStore : IDisposable
         return command.ExecuteNonQuery() > 0;
     }
 
+    /// <summary>
+    /// 한 화면의 영역을 모두 지운다. 이름과 비고는 남긴다.
+    /// 셀렉터가 하나도 없는 영역 묶음은 다시 방문할 때 도움이 되기는커녕 응답만 채우고 잘못된 확신을 준다.
+    /// 그렇다고 기록째 지우면 함께 적어 둔 비고까지 사라지므로, 쓸모없는 쪽만 덜어낸다.
+    /// </summary>
+    /// <param name="signature">영역을 비울 화면의 지문.</param>
+    /// <returns>지워진 영역 수.</returns>
+    public int DropRegions(string signature)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "DELETE FROM regions WHERE signature = $signature;";
+        command.Parameters.AddWithValue("$signature", signature);
+
+        return command.ExecuteNonQuery();
+    }
+
     /// <summary>데이터베이스 연결을 닫는다.</summary>
     public void Dispose() => _connection.Dispose();
 
