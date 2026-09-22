@@ -78,10 +78,12 @@ public static class ScreenRegionPicker
 
             // 컨트롤 템플릿이 만든 부품은 앱 작성자가 놓은 것이 아니라 스크롤바나 편집기의 내부 구조다.
             // 기록에 담아도 다음 방문에 쓸 일이 없고, 자리만 차지해 정작 필요한 컨트롤을 밀어낸다.
-            if (element is FrameworkElement { TemplatedParent: not null })
-                return;
-
-            seen.Add((element, id, name));
+            //
+            // 다만 부품 자신만 빼고 그 아래로는 계속 내려가야 한다. 창의 내용물은 창 템플릿 안쪽
+            // ContentPresenter 아래에 놓이므로, 여기서 가지를 끊으면 앱 화면 전체를 놓친다
+            // (실측: 요소 576개짜리 VisualPro 화면에서 셀렉터를 가진 영역이 0개였다).
+            if (element is not FrameworkElement { TemplatedParent: not null })
+                seen.Add((element, id, name));
         }
 
         foreach (var child in VisualTree.VisualChildren.Of(node, depth: 0, []))

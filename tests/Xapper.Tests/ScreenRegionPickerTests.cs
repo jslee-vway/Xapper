@@ -114,6 +114,38 @@ public class ScreenRegionPickerTests
     }
 
     [Fact]
+    public void Pick_LooksInsideTemplatePartsForTheAppsOwnContent()
+    {
+        StaThread.Run(() =>
+        {
+            // 창의 내용물은 창 템플릿 안쪽 ContentPresenter 아래에 놓인다. 그러니 앱 컨트롤에 닿으려면
+            // 반드시 템플릿 부품을 먼저 지나야 한다. 부품에서 멈추면 화면 전체를 놓친다(실측: 요소 576개짜리
+            // VisualPro 화면에서 셀렉터를 가진 영역이 0개였다).
+            var template = new ControlTemplate(typeof(ContentControl));
+            var chrome = new FrameworkElementFactory(typeof(Border));
+            chrome.SetValue(FrameworkElement.NameProperty, "PART_WindowRoot");
+            chrome.SetValue(Border.BackgroundProperty, Brushes.WhiteSmoke);
+            var host = new FrameworkElementFactory(typeof(ContentPresenter));
+            chrome.AppendChild(host);
+            template.VisualTree = chrome;
+
+            var shell = new ContentControl
+            {
+                Width = 360,
+                Height = 260,
+                Template = template,
+                Content = Named("AppControl", 0, 0)
+            };
+            Canvas.SetLeft(shell, 10);
+            Canvas.SetTop(shell, 10);
+
+            var canvas = BuildCanvas(400, 300, shell);
+
+            Assert.Equal(["AppControl"], IdsOf(ScreenRegionPicker.Pick(canvas, maxRegions: 50)));
+        });
+    }
+
+    [Fact]
     public void Pick_SkipsAnIdThatIsNotUnique()
     {
         StaThread.Run(() =>
