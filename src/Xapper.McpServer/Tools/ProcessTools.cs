@@ -122,8 +122,10 @@ public sealed class ProcessTools
         "whenever you can start the app yourself: there is no injection step, so it is faster, and it catches " +
         "the app from its first moment - splash screens and login dialogs that open before the main window. " +
         "The launched app becomes the active session; xapper_detach later disconnects without closing it. " +
-        "Framework-dependent .NET apps only - for .NET Framework or self-contained builds, start the app " +
-        "yourself and use xapper_attach.")]
+        "Framework-dependent .NET apps only - for .NET Framework, start the app yourself and use xapper_attach. " +
+        "Two things to know: the app's own child processes inherit the hook, so a helper that runs on an OLDER " +
+        ".NET than the app will fail to start - attach instead when the app spawns such helpers; and a trimmed " +
+        "self-contained build silently never loads the hook, so the call ends in a timeout.")]
     public async Task<string> Launch(
         [Description("Absolute path to the app's .exe")] string exePath,
         [Description("Command-line arguments to pass to the app")] string? args = null,
@@ -132,6 +134,10 @@ public sealed class ProcessTools
     {
         if (!File.Exists(exePath))
             return $"Error: no file at {exePath}.";
+
+        // 제한 시간은 프로세스를 띄우기 전에 거른다. 띄운 뒤에 거절하면 앱은 돌고 있는데 pid 를 알릴 길이 없어진다.
+        if (timeoutMs <= 0)
+            return $"Error: timeoutMs must be greater than 0 (got {timeoutMs}).";
 
         string hookDll;
         try
@@ -191,6 +197,11 @@ public sealed class ProcessTools
         }
         catch (OperationCanceledException)
         {
+            // 바깥 토큰이 취소된 것과 제한 시간이 지난 것은 원인이 다르다. 둘을 같은 문장으로 알리면
+            // 호출자가 있지도 않은 기동 문제를 찾아 나서게 된다.
+            if (ct.IsCancellationRequested)
+                return $"Cancelled while waiting for the inspector in {name} (pid {process.Id}). The app is running.";
+
             return $"Error: the inspector in {name} (pid {process.Id}) did not come up within {timeoutMs} ms. " +
                    "The app is running - you can retry with xapper_attach.";
         }
