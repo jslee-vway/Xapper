@@ -301,14 +301,36 @@ public sealed class IpcServer
     }
 
     /// <summary>
-    /// 제한 시간 안에 요소가 상호작용 가능한 상태가 되지 않았을 때의 오류 응답을 만듭니다.
+    /// 요소가 조작을 받을 상태가 되지 않았을 때의 오류 응답을 만듭니다.
+    /// 무엇이 막고 있었는지를 적어 주는 것이 핵심이다. 셋 다 늘어놓으면 부르는 쪽이 어느 것인지
+    /// 다시 물어보게 되고(실측: 매번 get_property 한 번이 뒤따랐다), 해야 할 일도 경우마다 다르다.
     /// </summary>
-    private static IpcMessage NotReadyError(string messageId, int elementRef, int timeoutMs)
+    /// <param name="messageId">응답에 실을 메시지 ID.</param>
+    /// <param name="elementRef">기다린 요소의 참조 번호.</param>
+    /// <param name="timeoutMs">요청이 허락한 대기 시간.</param>
+    /// <param name="waiter">기다림을 수행한 대기자. 마지막으로 본 상태를 읽는다.</param>
+    private static IpcMessage NotReadyError(
+        string messageId, int elementRef, int timeoutMs, AutoWait.ElementWaiter waiter)
     {
+        var state = waiter.LastState;
+        var obstacle = state is null ? "was not ready" : state.Obstacle;
+        var waited = waiter.StoppedEarly
+            ? "and Xapper stopped waiting rather than spending the rest of the timeout on it"
+            : $"for the whole {timeoutMs} ms wait";
+
+        var remedy = state switch
+        {
+            { Visible: false } => "Bring it into view first - open the tab, pane or dialog that holds it.",
+            { Loaded: false } => "Give the view longer with a higher timeout, or act after it has settled.",
+            { Enabled: false } =>
+                "The app is refusing this action, not Xapper. A longer timeout will not help. Find what enables " +
+                "the control - a required field, a selection, a mode - or accept that the action is unavailable " +
+                "here. If something asynchronous enables it, try once more.",
+            _ => "Re-read the state, or raise the timeout."
+        };
+
         return IpcSerializer.CreateError(messageId,
-            $"Element ref={elementRef} did not become visible, enabled and loaded within {timeoutMs} ms. " +
-            "It may be disabled until a form validates, hidden behind another view, or still loading. " +
-            "Re-read the state, or raise the timeout.");
+            $"Element ref={elementRef} {obstacle} {waited}, so the action did not run. {remedy}");
     }
 
     /// <summary>
@@ -541,7 +563,7 @@ public sealed class IpcServer
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, elementRef, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout, waiter);
 
         var withMods = modifiers == ModifierKeys.None ? "" : $" with {request.Modifiers?.Trim()}";
 
@@ -647,7 +669,7 @@ public sealed class IpcServer
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, elementRef, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout, waiter);
 
         var rx = request.X ?? 0.5;
         var ry = request.Y ?? 0.5;
@@ -695,7 +717,7 @@ public sealed class IpcServer
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, elementRef, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout, waiter);
 
         var rx = request.X ?? 0.5;
         var ry = request.Y ?? 0.5;
@@ -760,7 +782,7 @@ public sealed class IpcServer
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, elementRef, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout, waiter);
 
         var (typeDone, result) = await RunOnUiThread(
             () => TypeAction.Execute(element, request.Text, request.Clear), request.Timeout);
@@ -799,7 +821,7 @@ public sealed class IpcServer
 
             var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
             if (!await waiter.WaitForReady(refElement))
-                return NotReadyError(message.Id, elementRef, request.Timeout);
+                return NotReadyError(message.Id, elementRef, request.Timeout, waiter);
         }
 
         var (keyDone, keyResult) = await RunOnUiThread(
@@ -838,7 +860,7 @@ public sealed class IpcServer
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, elementRef, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout, waiter);
 
         var (selectDone, result) = await RunOnUiThread(
             () => SelectAction.Execute(element, request.ItemText, request.ItemIndex), request.Timeout);
@@ -870,7 +892,7 @@ public sealed class IpcServer
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, elementRef, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout, waiter);
 
         var (toggleDone, result) = await RunOnUiThread(() => ToggleAction.Execute(element), request.Timeout);
         if (!toggleDone)
@@ -901,7 +923,7 @@ public sealed class IpcServer
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, elementRef, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout, waiter);
 
         var (expandDone, result) = await RunOnUiThread(
             () => ExpandAction.Execute(element, request.Expand), request.Timeout);
@@ -934,7 +956,7 @@ public sealed class IpcServer
 
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         if (!await waiter.WaitForReady(element))
-            return NotReadyError(message.Id, elementRef, request.Timeout);
+            return NotReadyError(message.Id, elementRef, request.Timeout, waiter);
 
         var (scrollDone, result) = await RunOnUiThread(
             () => ScrollAction.Execute(element, request.HorizontalPercent, request.VerticalPercent), request.Timeout);
@@ -972,9 +994,9 @@ public sealed class IpcServer
         var waiter = new AutoWait.ElementWaiter(TimeSpan.FromMilliseconds(request.Timeout));
         // source/target 이 null 이 아니라는 것은 해당 ref 가 지정됐다는 뜻이다(GetValueOrDefault 는 그 실제 값).
         if (source is not null && !await waiter.WaitForReady(source))
-            return NotReadyError(message.Id, request.SourceRef.GetValueOrDefault(), request.Timeout);
+            return NotReadyError(message.Id, request.SourceRef.GetValueOrDefault(), request.Timeout, waiter);
         if (target is not null && !await waiter.WaitForReady(target))
-            return NotReadyError(message.Id, request.TargetRef.GetValueOrDefault(), request.Timeout);
+            return NotReadyError(message.Id, request.TargetRef.GetValueOrDefault(), request.Timeout, waiter);
 
         // 좌표가 덜 지정된 드래그는 예외 대신 여기서 오류로 돌려준다(결함 2): 좌표 계산은 UI 스레드 안에서
         // 일어나므로 그 안에서 던지면 대상 앱을 죽일 수 있다. 아래 검사는 ResolveStartPoint/ResolveEndPoint 의

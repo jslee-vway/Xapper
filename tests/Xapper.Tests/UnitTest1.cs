@@ -11,13 +11,13 @@ namespace Xapper.Tests;
 public class IpcSerializerTests
 {
     [Fact]
-    public void Serialize_Deserialize_RoundTrip()
+    public async Task Serialize_Deserialize_RoundTrip()
     {
         var original = IpcSerializer.CreateRequest("snapshot", new SnapshotRequest { MaxDepth = 3 });
 
         var bytes = IpcSerializer.Serialize(original);
         using var stream = new MemoryStream(bytes);
-        var deserialized = IpcSerializer.DeserializeAsync(stream).GetAwaiter().GetResult();
+        var deserialized = await IpcSerializer.DeserializeAsync(stream);
 
         Assert.NotNull(deserialized);
         Assert.Equal(original.Id, deserialized.Id);

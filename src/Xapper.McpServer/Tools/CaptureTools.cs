@@ -48,9 +48,11 @@ public sealed class CaptureTools
         "Capture the window or an element as an image. mode=\"render\" (default) redraws the app's visual tree: " +
         "works while covered or unfocused but omits other windows (dialogs, popups, menus). mode=\"screen\" " +
         "reads the desktop pixels: shows dialogs and popups but also anything on top (the response warns about other " +
-        "open windows or the app not being in front). Images cost many tokens " +
-        "- prefer xapper_get_property or xapper_assert for checks, and narrow the shot with ref instead of capturing " +
-        "the whole window at full size. With annotate a narrow shot also keeps the numbers readable.")]
+        "open windows or the app not being in front). Images cost many tokens, so reach for one only when you need " +
+        "to see how something is drawn. To read what a panel or a grid currently holds, call xapper_snapshot with " +
+        "rootRef set to it: that returns the same content as text for a fraction of the cost. To check one value, " +
+        "call xapper_get_property or xapper_assert. When you do take a picture, narrow it with ref instead of " +
+        "capturing the whole window at full size; with annotate a narrow shot also keeps the numbers readable.")]
     public async Task<IEnumerable<ContentBlock>> Screenshot(
         [Description("Element ref to capture (omit for the whole window)")] int? @ref = null,
         [Description("Shrink to at most this many pixels wide, keeping the aspect ratio (omit for full size)")] int? maxWidth = null,

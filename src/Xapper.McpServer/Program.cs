@@ -45,11 +45,13 @@ var serverInstructions = """
     are the ones that cut the most work: recall replaces a screenshot on a screen you have seen before, run
     replaces a whole chain of calls, and launch replaces attaching.
 
-    Two habits waste far more than anything else. Do not screenshot to check whether an action worked - the
+    Three habits waste far more than anything else. Do not screenshot to check whether an action worked - the
     action's own response already says what happened, and xapper_get_property or xapper_assert confirms a value
     for a fraction of the tokens an image costs. Do not screenshot to find a control - xapper_find and target
     selectors do that live, and when a control has no id, name or text, one xapper_screenshot with
-    annotate: true hands you a ref for every clickable thing at once.
+    annotate: true hands you a ref for every clickable thing at once. Do not screenshot to read what a panel or
+    a grid holds - xapper_snapshot with rootRef returns that same content as text. A picture is the right answer
+    only when you need to see how something is drawn: layout, rendering, a chart, a control that paints itself.
 
     Xapper drives a WPF application by injecting into its process and walking the real visual tree, not the
     UI Automation tree. Seeing and acting are not equally unconstrained, and the difference matters:
