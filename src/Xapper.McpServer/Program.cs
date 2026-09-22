@@ -74,6 +74,10 @@ var serverInstructions = """
     summary. Explore first with find/snapshot, then drive with a script. Prefer id/name selectors and waitUntil
     over sleep, so the same script can be re-run.
 
+    On arriving at a screen, call xapper_screen_recall first. A known screen comes back with the selectors and
+    anchors you need, so you can act without a screenshot. An unknown or changed screen is the signal to look
+    once with xapper_screenshot(annotate: true) and then xapper_screen_learn it, so the next visit is free.
+
     Attach first: xapper_list_processes, then xapper_attach. Attaching again to a process you are already
     attached to is rejected, but the rejection surfaces only after the injection attempt, as a connect
     failure - so detach before re-attaching rather than retrying.
@@ -97,6 +101,10 @@ builder.Services.AddSingleton<SessionManager>();
 builder.Services.AddSingleton<IOperatorNotice, OperatorNotice>();
 builder.Services.AddSingleton(new WpfProcessInjector(inspectorBaseDir, genericInjectorDir));
 
+// 화면 기록은 서버가 다시 뜨더라도 남아야 하므로 사용자 로컬 앱 데이터 폴더의 파일 하나에 담는다.
+builder.Services.AddSingleton(new ScreenStore(Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Xapper", "screens.db")));
+
 builder.Services.AddMcpServer(options =>
 {
     options.ServerInfo = new()
@@ -116,7 +124,8 @@ builder.Services.AddMcpServer(options =>
 .WithTools<FindTools>()
 .WithTools<BatchTools>()
 .WithTools<NoticeTools>()
-.WithTools<RunTools>();
+.WithTools<RunTools>()
+.WithTools<ScreenTools>();
 
 var app = builder.Build();
 await app.RunAsync();
