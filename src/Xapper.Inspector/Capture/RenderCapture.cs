@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Media;
@@ -18,9 +19,14 @@ public static class RenderCapture
     /// </summary>
     /// <param name="element">캡처할 UI 요소.</param>
     /// <param name="maxWidth">인코딩할 최대 가로 픽셀 수. 원본이 더 넓으면 비율을 유지한 채 축소. null이면 축소하지 않음.</param>
+    /// <param name="marks">
+    /// 겹쳐 그릴 번호 상자. null 이거나 비어 있으면 아무것도 그리지 않는다. 사각형은 <paramref name="element"/> 의
+    /// DIP 좌표계 기준이므로, 같은 비트맵에 한 번 더 그리면 DPI 배율과 축소 배율이 자동으로 함께 적용된다.
+    /// </param>
     /// <returns>Base64 인코딩된 PNG 이미지와 인코딩된 픽셀 크기.</returns>
     /// <exception cref="InvalidOperationException">요소에 렌더링 가능한 영역이 없는 경우.</exception>
-    public static ScreenshotResponse CaptureElement(UIElement element, int? maxWidth = null)
+    public static ScreenshotResponse CaptureElement(
+        UIElement element, int? maxWidth = null, IReadOnlyList<MarkCandidate>? marks = null)
     {
         var bounds = VisualTreeHelper.GetDescendantBounds(element);
         if (bounds.IsEmpty)
@@ -41,6 +47,9 @@ public static class RenderCapture
 
         renderBitmap.Render(element);
 
+        if (marks is { Count: > 0 })
+            renderBitmap.Render(BuildOverlay(marks, bounds, dpi.PixelsPerDip));
+
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(renderBitmap));
 
@@ -58,6 +67,48 @@ public static class RenderCapture
             OriginY = origin?.Y,
             Scale = scale
         };
+    }
+
+    /// <summary>번호 상자 외곽선의 두께 (DIP).</summary>
+    private const double MarkLineThickness = 2;
+
+    /// <summary>번호 라벨의 글자 크기 (DIP).</summary>
+    private const double MarkFontSize = 11;
+
+    /// <summary>
+    /// 번호 상자를 그린 시각 요소를 만듭니다. 캡처 대상과 같은 DIP 좌표계에 그리므로 픽셀 변환을 하지 않는다.
+    /// <paramref name="bounds"/> 의 왼쪽 위가 비트맵의 (0,0) 이므로 그만큼 옮겨 그린다.
+    /// </summary>
+    private static DrawingVisual BuildOverlay(IReadOnlyList<MarkCandidate> marks, Rect bounds, double pixelsPerDip)
+    {
+        var outline = new Pen(Brushes.Red, MarkLineThickness);
+        var label = Brushes.Red;
+        var visual = new DrawingVisual();
+
+        using var context = visual.RenderOpen();
+        context.PushTransform(new TranslateTransform(-bounds.X, -bounds.Y));
+
+        foreach (var mark in marks)
+        {
+            context.DrawRectangle(null, outline, mark.Rect);
+
+            var text = new FormattedText(
+                mark.Number.ToString(CultureInfo.InvariantCulture),
+                CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight,
+                new Typeface("Segoe UI"),
+                MarkFontSize,
+                Brushes.White,
+                pixelsPerDip);
+
+            // 번호는 요소의 왼쪽 위에 채운 상자 위로 얹어, 어떤 배경 위에서도 읽히게 한다.
+            var plate = new Rect(mark.Rect.X, mark.Rect.Y, text.Width + 6, text.Height + 2);
+            context.DrawRectangle(label, null, plate);
+            context.DrawText(text, new Point(plate.X + 3, plate.Y + 1));
+        }
+
+        context.Pop();
+        return visual;
     }
 
     /// <summary>
@@ -100,13 +151,15 @@ public static class RenderCapture
     /// </summary>
     /// <param name="window">캡처할 윈도우. null이면 Application.Current.MainWindow 사용.</param>
     /// <param name="maxWidth">인코딩할 최대 가로 픽셀 수. null이면 축소하지 않음.</param>
+    /// <param name="marks">겹쳐 그릴 번호 상자. null 이거나 비어 있으면 아무것도 그리지 않는다.</param>
     /// <returns>Base64 인코딩된 PNG 이미지와 인코딩된 픽셀 크기.</returns>
-    public static ScreenshotResponse CaptureWindow(Window? window = null, int? maxWidth = null)
+    public static ScreenshotResponse CaptureWindow(
+        Window? window = null, int? maxWidth = null, IReadOnlyList<MarkCandidate>? marks = null)
     {
         window ??= Application.Current.MainWindow;
         if (window == null)
             throw new InvalidOperationException("No window available to capture");
 
-        return CaptureElement(window, maxWidth);
+        return CaptureElement(window, maxWidth, marks);
     }
 }
