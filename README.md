@@ -21,6 +21,7 @@
   - [빌드](#빌드)
   - [MCP 서버 연결 (Claude Desktop)](#mcp-서버-연결-claude-desktop)
   - [MCP 서버 연결 (Claude Code)](#mcp-서버-연결-claude-code)
+  - [에이전트 스킬 설치 (권장)](#에이전트-스킬-설치-권장)
   - [사용 예시](#사용-예시)
 
 </b>
@@ -104,6 +105,8 @@ tests/
 └── Xapper.Tests           단위 테스트 (xUnit)
 external/
 └── snoop-bin/             Snoop GenericInjector 네이티브 DLL
+skills/
+└── xapper/                에이전트 작업 절차 스킬 (Claude Code 쪽에 복사해 사용)
 ```
 
 Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내장**되어 있어 빌드된 실행 파일만으로 동작합니다. 별도의 경로 설정이나 환경변수 없이 바로 사용 가능합니다.
@@ -258,6 +261,20 @@ src/Xapper.McpServer/bin/Debug/net9.0-windows/Xapper.McpServer.exe
 | `XAPPER_INSPECTOR_BASE_DIR` | Inspector DLL 기본 디렉토리 오버라이드 (TFM별 하위 폴더 포함) |
 | `XAPPER_GENERIC_INJECTOR_DIR` | GenericInjector DLL 디렉토리 오버라이드 |
 
+### **에이전트 스킬 설치 (권장)**
+
+`skills/xapper` 를 Claude Code 쪽으로 복사하면, 에이전트가 작업을 시작하는 시점에 Xapper 사용 절차를 먼저 읽습니다. 서버 지침과 도구 설명이 닿지 못하는 자리를 메우는 것이라 실제 토큰 사용량 차이가 큽니다. 특히 화면을 한 번 배워 두고 다음 방문에 다시 쓰는 흐름이 여기에 담겨 있습니다.
+
+```bash
+# 여러 프로젝트에서 쓸 때
+cp -r skills/xapper ~/.claude/skills/
+
+# 한 프로젝트에서만 쓸 때
+cp -r skills/xapper <프로젝트>/.claude/skills/
+```
+
+자세한 내용은 [`skills/README.md`](skills/README.md) 를 참고하십시오.
+
 ### **사용 예시**
 
 MCP 연결 후, AI 에이전트에게 자연어로 요청합니다:
@@ -309,6 +326,7 @@ AI 에이전트가 자동으로 수행하는 흐름:
 | `xapper_batch` | 여러 단계를 한 호출에 (첫 실패에서 중단, 단계별 결과) | `steps` (`{"tool", ...}` 배열, 최대 50) |
 
 <br/>
+
 
 ## **동작 원리**
 
