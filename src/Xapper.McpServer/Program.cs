@@ -102,6 +102,7 @@ builder.Services.AddSingleton<IOperatorNotice, OperatorNotice>();
 builder.Services.AddSingleton(new WpfProcessInjector(inspectorBaseDir, genericInjectorDir));
 
 // 화면 기록은 서버가 다시 뜨더라도 남아야 하므로 사용자 로컬 앱 데이터 폴더의 파일 하나에 담는다.
+builder.Services.AddSingleton<ScreenTracker>();
 builder.Services.AddSingleton(new ScreenStore(Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Xapper", "screens.db")));
 

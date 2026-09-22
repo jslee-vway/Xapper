@@ -31,6 +31,20 @@ public class ScreenRecallSummaryTests
     }
 
     [Fact]
+    public void Known_ListsEveryRegionItWasGiven()
+    {
+        // 저장 단계에서 텍스트로만 잡히는 데이터 행과 컨트롤 템플릿 부품을 이미 걸렀으므로,
+        // 요약은 받은 것을 빠짐없이 보여 주기만 하면 된다.
+        var record = Record();
+
+        var text = ScreenRecallSummary.Known(record);
+
+        var listed = text.Split(Environment.NewLine.ToCharArray())
+            .Count(line => line.Contains("id=") || line.Contains(" in "));
+        Assert.Equal(record.Regions.Count, listed);
+    }
+
+    [Fact]
     public void Unknown_TellsTheCallerWhatToDoNext()
     {
         var text = ScreenRecallSummary.Unknown("a3f9c1e8", changedSinceLastRecall: true);

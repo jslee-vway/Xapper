@@ -1264,7 +1264,8 @@ public sealed class IpcServer
                     Text = VisualTree.ElementText.Of(candidate.Element),
                     Anchor = candidate.Anchor,
                     AnchorX = candidate.AnchorX,
-                    AnchorY = candidate.AnchorY
+                    AnchorY = candidate.AnchorY,
+                    FromTemplate = (candidate.Element as FrameworkElement)?.TemplatedParent is not null
                 });
             }
 
@@ -1313,7 +1314,8 @@ public sealed class IpcServer
                 Text = VisualTree.ElementText.Of(candidate.Element),
                 Anchor = candidate.Anchor,
                 AnchorX = candidate.AnchorX,
-                AnchorY = candidate.AnchorY
+                AnchorY = candidate.AnchorY,
+                FromTemplate = (candidate.Element as FrameworkElement)?.TemplatedParent is not null
             });
         }
 

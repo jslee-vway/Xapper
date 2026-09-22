@@ -28,13 +28,7 @@ public sealed class ScreenTools
 
     private readonly SessionManager _sessionManager;
     private readonly ScreenStore _store;
-
-    /// <summary>
-    /// 직전 조회에서 본 화면의 지문. 지금 지문과 견주어 "화면이 바뀌었다" 고 알려 주기 위해서만 쓴다.
-    /// 모르는 화면이 왜 모르는 화면인지 — 처음 보는 것인지, 방금 무언가 눌러서 다른 화면으로 넘어간 것인지 —
-    /// 를 모델이 구분할 수 있게 해 준다.
-    /// </summary>
-    private string? _lastSignature;
+    private readonly ScreenTracker _tracker;
 
     #endregion
 
@@ -43,10 +37,12 @@ public sealed class ScreenTools
     /// <summary><see cref="ScreenTools"/>의 새 인스턴스를 생성합니다.</summary>
     /// <param name="sessionManager">활성 Inspector 세션을 제공하는 세션 관리자.</param>
     /// <param name="store">화면 기록이 사는 저장소.</param>
-    public ScreenTools(SessionManager sessionManager, ScreenStore store)
+    /// <param name="tracker">직전에 본 화면을 기억하는 싱글턴. 이 도구는 호출마다 새로 만들어지므로 여기에 둔다.</param>
+    public ScreenTools(SessionManager sessionManager, ScreenStore store, ScreenTracker tracker)
     {
         _sessionManager = sessionManager;
         _store = store;
+        _tracker = tracker;
     }
 
     #endregion
@@ -76,8 +72,8 @@ public sealed class ScreenTools
         if (profile is null)
             return error ?? NoProfile;
 
-        var changed = _lastSignature is { } previous && previous != profile.Signature;
-        _lastSignature = profile.Signature;
+        var changed = _tracker.LastSignature is { } previous && previous != profile.Signature;
+        _tracker.LastSignature = profile.Signature;
 
         var record = _store.Find(profile.Signature);
         return record is null
@@ -121,15 +117,37 @@ public sealed class ScreenTools
             App = ActiveAppName(),
             Name = name.Trim(),
             Notes = string.IsNullOrEmpty(trimmedNotes) ? null : trimmedNotes,
-            Regions = profile.Regions.Select(ToRegion).ToList()
+            Regions = profile.Regions.Where(IsWorthStoring).Select(ToRegion).ToList()
         };
 
         _store.Save(record);
-        _lastSignature = profile.Signature;
+        _tracker.LastSignature = profile.Signature;
 
         return $"Learned \"{record.Name}\" for {record.App} (signature {record.Signature}): " +
                $"{record.Regions.Count} region(s) out of {profile.ElementCount} elements. " +
                "Call xapper_screen_recall on the next visit instead of taking a screenshot.";
+    }
+
+    /// <summary>
+    /// 이 영역을 기록해 둘 값어치가 있는지 판단합니다.
+    /// id·name 으로 잡히는 요소와, 셀렉터가 없어 기준점이 붙은 요소만 남긴다.
+    ///
+    /// 텍스트로만 잡히는 요소를 빼는 이유는 지문에서 텍스트를 뺀 이유와 같다. 그것은 구조가 아니라 데이터다.
+    /// 실측에서 목록의 "row 0"~"row 9" 열 줄이 그대로 기록에 들어갔는데, 그런 셀렉터는 데이터가 바뀌는 순간
+    /// 가리키는 것이 없어진다. 게다가 글자가 붙은 버튼은 필요할 때 xapper_find 로 즉시, 정확하게 찾을 수 있어
+    /// 미리 적어 둘 이유가 없다. 기록이 값을 하는 것은 다시 찾기 비싼 것, 즉 id·name 과 기준점이다.
+    /// </summary>
+    private static bool IsWorthStoring(ScreenMark mark)
+    {
+        // 컨트롤 템플릿이 만든 부품은 앱 작성자가 놓은 것이 아니라 스크롤바나 편집기의 내부 구조다.
+        // 실측에서 저장된 여덟 개 중 다섯 개가 그런 것들(PART_Track, splitBorder 등)이라 기록이 거의 쓸모없었다.
+        // 그림에는 그려 두되(가려진 것을 누르지 않게 하려면 필요하다) 기록에서는 뺀다.
+        if (mark.FromTemplate)
+            return false;
+
+        return !string.IsNullOrEmpty(mark.AutomationId)
+            || !string.IsNullOrEmpty(mark.Name)
+            || !string.IsNullOrEmpty(mark.Anchor);
     }
 
     /// <summary>한 앱의 화면 기록을 모두 지웁니다.</summary>
@@ -152,7 +170,7 @@ public sealed class ScreenTools
 
         var target = string.IsNullOrWhiteSpace(app) ? ActiveAppName() : app.Trim();
         var removed = _store.Forget(target);
-        _lastSignature = null;
+        _tracker.LastSignature = null;
 
         return removed == 0
             ? $"No screen records were stored for {target}; nothing to forget."
