@@ -26,6 +26,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
     <PackageReference Include="ModelContextProtocol" Version="1.2.0" />
     <PackageReference Include="Jint" Version="4.16.3" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
   </ItemGroup>
 
   <!-- 인젝션 페이로드 임베딩: GenericInjector + 멀티타겟 Inspector 빌드 출력물 -->
