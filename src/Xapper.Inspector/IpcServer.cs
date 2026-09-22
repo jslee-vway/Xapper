@@ -1243,6 +1243,7 @@ public sealed class IpcServer
             ? RenderCapture.CaptureWindow(maxWidth: maxWidth, marks: candidates)
             : RenderCapture.CaptureElement(element, maxWidth, candidates);
 
+        WarnAboutWindowsNotInTheImage(response);
         response.MarksOmitted = omitted;
         foreach (var candidate in candidates)
         {
@@ -1272,16 +1273,27 @@ public sealed class IpcServer
             ? RenderCapture.CaptureElement(element, maxWidth)
             : RenderCapture.CaptureWindow(maxWidth: maxWidth);
 
-        // 렌더 방식은 시각 트리 하나만 그린다. 별도 창은 물론이고 팝업·메뉴·드롭다운도 자기 HWND에 살아 담기지 않는다.
-        // 그래서 Window 목록이 아니라 최상위 창 개수로 센다 — 팝업은 Window가 아니라서 그 목록에 나타나지 않는다.
+        WarnAboutWindowsNotInTheImage(response);
+        return response;
+    }
+
+    /// <summary>
+    /// 렌더 방식이 담지 못한 창이 있으면 그 사실을 응답에 적습니다.
+    /// 렌더 방식은 시각 트리 하나만 그린다. 별도 창은 물론이고 팝업·메뉴·드롭다운도 자기 HWND에 살아 담기지 않는다.
+    /// 그래서 Window 목록이 아니라 최상위 창 개수로 센다 — 팝업은 Window가 아니라서 그 목록에 나타나지 않는다.
+    ///
+    /// annotate 경로에서도 반드시 붙여야 한다. 번호 상자는 그린 시각 트리만 히트테스트하므로, 모달 대화상자에
+    /// 가려진 요소에도 상자와 ref 가 달린다. 이 경고가 없으면 호출자는 그림이 화면 전부라고 믿고 닿지 않는 것을 누른다.
+    /// </summary>
+    private static void WarnAboutWindowsNotInTheImage(ScreenshotResponse response)
+    {
         var otherWindows = DesktopCapture.CountVisibleWindows() - 1;
         if (otherWindows > 0)
             response.Warning =
                 $"{otherWindows} other window(s) are open and are not in this image. Popups, context menus and " +
                 $"drop-downs are never in it either. Use mode=\"{ScreenshotModes.Screen}\" to capture what is " +
-                "actually on the desktop.";
-
-        return response;
+                "actually on the desktop. Anything they cover is still marked here, because the marks come from " +
+                "this app's visual tree.";
     }
 
     /// <summary>

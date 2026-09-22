@@ -21,6 +21,16 @@ public sealed record MarkCandidate(int Number, UIElement Element, Rect Rect);
 /// </summary>
 public static class MarkPicker
 {
+    #region Fields
+
+    /// <summary>
+    /// 컨테이너 판정에 넘길 후보 수를 상한의 몇 배까지 둘지. 걸러진 뒤에도 상한을 채울 만큼은 남겨야 하므로
+    /// 여유를 두되, 이차 비용이 커지지 않게 묶는다.
+    /// </summary>
+    private const int ComparisonHeadroom = 4;
+
+    #endregion
+
     #region Public Methods
 
     /// <summary>
@@ -38,7 +48,15 @@ public static class MarkPicker
         var reachable = new List<(UIElement Element, Rect Rect)>();
         Collect(captured, captured, bounds, minSize, reachable);
 
-        var useful = DropContainers(Deduplicate(reachable));
+        // 컨테이너 판정은 후보끼리 서로 견주므로 개수의 제곱에 비례한다. 셀이 수천 개인 그리드 화면에서는
+        // 그것만으로 대상 앱의 UI 스레드가 1초 가까이 멎는다(측정: 후보 5000개에 763ms). 어차피 상한만큼만
+        // 남길 것이고 남기는 기준도 "작은 것 우선" 이므로, 견주기 전에 작은 쪽부터 넉넉히 추려 비용을 묶는다.
+        var trimmed = reachable
+            .OrderBy(entry => AreaOf(entry.Rect))
+            .Take(maxMarks * ComparisonHeadroom)
+            .ToList();
+
+        var useful = DropContainers(Deduplicate(trimmed));
         omitted = Math.Max(0, useful.Count - maxMarks);
 
         // 상한을 넘으면 면적이 작은 것을 남긴다. 큰 것은 대개 배경이나 컨테이너이고,

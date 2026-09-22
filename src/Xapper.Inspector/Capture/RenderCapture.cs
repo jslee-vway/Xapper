@@ -48,7 +48,7 @@ public static class RenderCapture
         renderBitmap.Render(element);
 
         if (marks is { Count: > 0 })
-            renderBitmap.Render(BuildOverlay(marks, bounds, dpi.PixelsPerDip));
+            renderBitmap.Render(BuildOverlay(marks, dpi.PixelsPerDip));
 
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(renderBitmap));
@@ -77,16 +77,19 @@ public static class RenderCapture
 
     /// <summary>
     /// 번호 상자를 그린 시각 요소를 만듭니다. 캡처 대상과 같은 DIP 좌표계에 그리므로 픽셀 변환을 하지 않는다.
-    /// <paramref name="bounds"/> 의 왼쪽 위가 비트맵의 (0,0) 이므로 그만큼 옮겨 그린다.
+    ///
+    /// 좌표를 옮기지 않는 이유가 중요하다. <c>RenderTargetBitmap.Render</c> 는 요소의 <b>자기 원점</b>을 비트맵
+    /// (0,0) 에 놓고 음수 좌표에 있는 것은 잘라낸다. 자손 경계(<c>GetDescendantBounds</c>)의 왼쪽 위에 맞추는 것이
+    /// 아니다. 경계는 비트맵의 크기를 정하는 데만 쓰인다. 그래서 겹쳐 그리는 쪽도 같은 원점을 써야 하며,
+    /// 경계 원점만큼 옮기면 자손이 음수 좌표까지 뻗은 화면에서 상자가 그만큼 밀려 엉뚱한 컨트롤 위에 그려진다.
     /// </summary>
-    private static DrawingVisual BuildOverlay(IReadOnlyList<MarkCandidate> marks, Rect bounds, double pixelsPerDip)
+    private static DrawingVisual BuildOverlay(IReadOnlyList<MarkCandidate> marks, double pixelsPerDip)
     {
         var outline = new Pen(Brushes.Red, MarkLineThickness);
         var label = Brushes.Red;
         var visual = new DrawingVisual();
 
         using var context = visual.RenderOpen();
-        context.PushTransform(new TranslateTransform(-bounds.X, -bounds.Y));
 
         foreach (var mark in marks)
         {
@@ -106,13 +109,12 @@ public static class RenderCapture
             // 붙으므로 왼쪽 바깥이 가장 비어 있고, 자리가 없을 때만 안으로 접어 넣는다.
             var plateWidth = text.Width + 6;
             var plateHeight = text.Height + 2;
-            var plateX = mark.Rect.X - plateWidth >= bounds.X ? mark.Rect.X - plateWidth : mark.Rect.X;
+            var plateX = mark.Rect.X - plateWidth >= 0 ? mark.Rect.X - plateWidth : mark.Rect.X;
             var plate = new Rect(plateX, mark.Rect.Y, plateWidth, plateHeight);
             context.DrawRectangle(label, null, plate);
             context.DrawText(text, new Point(plate.X + 3, plate.Y + 1));
         }
 
-        context.Pop();
         return visual;
     }
 
