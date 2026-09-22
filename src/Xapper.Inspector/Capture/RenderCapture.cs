@@ -101,8 +101,13 @@ public static class RenderCapture
                 Brushes.White,
                 pixelsPerDip);
 
-            // 번호는 요소의 왼쪽 위에 채운 상자 위로 얹어, 어떤 배경 위에서도 읽히게 한다.
-            var plate = new Rect(mark.Rect.X, mark.Rect.Y, text.Width + 6, text.Height + 2);
+            // 번호는 요소 바깥 왼쪽에 얹는다. 요소 안에 그리면 바로 그 자리에 있는 글자를 덮어, 그림을
+            // 읽으려고 찍은 목적을 해친다(실측: "Alpha" 가 "pha" 로 보였다). 컨트롤의 글자는 대개 왼쪽에
+            // 붙으므로 왼쪽 바깥이 가장 비어 있고, 자리가 없을 때만 안으로 접어 넣는다.
+            var plateWidth = text.Width + 6;
+            var plateHeight = text.Height + 2;
+            var plateX = mark.Rect.X - plateWidth >= bounds.X ? mark.Rect.X - plateWidth : mark.Rect.X;
+            var plate = new Rect(plateX, mark.Rect.Y, plateWidth, plateHeight);
             context.DrawRectangle(label, null, plate);
             context.DrawText(text, new Point(plate.X + 3, plate.Y + 1));
         }

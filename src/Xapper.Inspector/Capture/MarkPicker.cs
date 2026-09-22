@@ -38,11 +38,12 @@ public static class MarkPicker
         var reachable = new List<(UIElement Element, Rect Rect)>();
         Collect(captured, captured, bounds, minSize, reachable);
 
-        omitted = Math.Max(0, reachable.Count - maxMarks);
+        var useful = DropContainers(Deduplicate(reachable));
+        omitted = Math.Max(0, useful.Count - maxMarks);
 
         // 상한을 넘으면 면적이 작은 것을 남긴다. 큰 것은 대개 배경이나 컨테이너이고,
         // 찾고 있는 것은 작고 이름 없는 셀이다.
-        var kept = reachable
+        var kept = useful
             .OrderBy(entry => entry.Rect.Width * entry.Rect.Height)
             .Take(maxMarks)
             .ToList();
@@ -57,6 +58,43 @@ public static class MarkPicker
     #endregion
 
     #region Private Methods
+
+    /// <summary>
+    /// 같은 자리를 차지하는 후보를 하나만 남깁니다.
+    /// 컨트롤 템플릿은 항목과 똑같은 크기의 Border 를 두는 일이 흔해서, 둘 다 상자를 받으면 테두리가 겹쳐 보인다.
+    /// 시각 트리를 위에서 아래로 훑었으므로 먼저 담긴 것이 바깥쪽이고, 그쪽이 의미 있는 요소다.
+    /// </summary>
+    private static List<(UIElement Element, Rect Rect)> Deduplicate(List<(UIElement Element, Rect Rect)> reachable)
+    {
+        var kept = new List<(UIElement Element, Rect Rect)>();
+        var seen = new HashSet<(int X, int Y, int Width, int Height)>();
+
+        foreach (var entry in reachable)
+        {
+            var key = ((int)Math.Round(entry.Rect.X), (int)Math.Round(entry.Rect.Y),
+                (int)Math.Round(entry.Rect.Width), (int)Math.Round(entry.Rect.Height));
+            if (seen.Add(key))
+                kept.Add(entry);
+        }
+
+        return kept;
+    }
+
+    /// <summary>
+    /// 다른 후보를 품고 있는 후보를 제외합니다.
+    /// 클릭해서 무언가가 일어나는 것은 가장 안쪽 요소이고, 컨테이너까지 상자를 받으면 그림이 큰 테두리로
+    /// 뒤덮여 오히려 읽을 수 없게 된다. 품은 것이 없는 큰 요소(빈 캔버스 등)는 실제 대상일 수 있으므로 남긴다.
+    /// </summary>
+    private static List<(UIElement Element, Rect Rect)> DropContainers(List<(UIElement Element, Rect Rect)> candidates)
+    {
+        return candidates
+            .Where(entry => !candidates.Any(other =>
+                AreaOf(other.Rect) < AreaOf(entry.Rect) && entry.Rect.Contains(other.Rect)))
+            .ToList();
+    }
+
+    /// <summary>사각형의 면적.</summary>
+    private static double AreaOf(Rect rect) => rect.Width * rect.Height;
 
     /// <summary>
     /// 시각 트리를 위에서 아래로 훑어 닿을 수 있는 요소를 모읍니다.

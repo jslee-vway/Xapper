@@ -136,6 +136,44 @@ public class MarkPickerTests
     }
 
     [Fact]
+    public void Pick_SkipsContainersThatHoldOtherMarks()
+    {
+        StaThread.Run(() =>
+        {
+            // 실측에서 드러난 문제다: 컨테이너까지 상자를 받으면 26개가 그려져 그림이 테두리로 뒤덮였다.
+            var inner = Box(20, 20, 40, 40);
+            var container = new Border { Width = 200, Height = 150, Background = Brushes.Gainsboro };
+            Canvas.SetLeft(container, 10);
+            Canvas.SetTop(container, 10);
+            var canvas = BuildCanvas(container, inner);
+
+            var marks = Pick(canvas);
+
+            Assert.Contains(marks, mark => ReferenceEquals(mark.Element, inner));
+            Assert.DoesNotContain(marks, mark => ReferenceEquals(mark.Element, container));
+        });
+    }
+
+    [Fact]
+    public void Pick_KeepsOnlyTheOutermostOfElementsSharingTheSameBox()
+    {
+        StaThread.Run(() =>
+        {
+            // 컨트롤 템플릿은 항목과 똑같은 크기의 Border 를 두는 일이 흔하다. 둘 다 상자를 받으면 테두리가 겹친다.
+            var inner = new Border { Width = 80, Height = 40, Background = Brushes.SteelBlue };
+            var outer = new Border { Background = Brushes.SteelBlue, Child = inner };
+            Canvas.SetLeft(outer, 10);
+            Canvas.SetTop(outer, 10);
+            var canvas = BuildCanvas(outer);
+
+            var marks = Pick(canvas);
+
+            Assert.Contains(marks, mark => ReferenceEquals(mark.Element, outer));
+            Assert.DoesNotContain(marks, mark => ReferenceEquals(mark.Element, inner));
+        });
+    }
+
+    [Fact]
     public void Pick_NumbersMarksFromOneInOrder()
     {
         StaThread.Run(() =>
