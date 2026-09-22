@@ -1,6 +1,6 @@
 ---
 name: xapper
-description: Use when driving, inspecting or testing a WPF desktop application through the Xapper MCP tools - launching or attaching to the app, clicking and typing in it, reading what a screen holds, or checking that a feature still works. Also "WPF 앱 테스트", "앱 띄워서 확인해줘", "화면 동작 확인", "Undo 되는지 확인해줘", "이 버튼 눌러봐".
+description: Use when something has to be checked in a running WPF desktop application rather than in code or tests - launching the app, clicking and typing in it, reading what a screen holds, or confirming that a change behaves as intended. Also "방금 작성한 코드 잘 돌아가는지 실제로 확인해줘", "앱 띄워서 확인해줘", "화면에서 직접 눌러봐", "UI 동작 확인해줘", "실제로 되는지 테스트해줘".
 ---
 
 # Driving a WPF app with Xapper
