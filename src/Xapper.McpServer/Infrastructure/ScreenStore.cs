@@ -146,6 +146,31 @@ public sealed class ScreenStore : IDisposable
         return removed;
     }
 
+    /// <summary>
+    /// 이미 있는 기록의 비고에 한 줄을 덧붙인다.
+    /// 다시 배우는 길로 비고를 남기면 그때 쓴 것만 남고 앞의 것이 사라지는데, 화면에 들어설 때 아는 사실보다
+    /// 눌러 보고 나서야 아는 사실이 더 값지다. 그래서 영역은 건드리지 않고 비고만 잇는 길을 따로 둔다.
+    /// </summary>
+    /// <param name="signature">비고를 붙일 화면의 지문.</param>
+    /// <param name="note">덧붙일 한 줄.</param>
+    /// <returns>그 지문의 기록이 있어 붙였으면 true.</returns>
+    public bool AppendNote(string signature, string note)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = """
+            UPDATE screens
+               SET notes = CASE
+                     WHEN notes IS NULL OR notes = '' THEN $note
+                     ELSE notes || char(10) || $note
+                   END
+             WHERE signature = $signature;
+            """;
+        command.Parameters.AddWithValue("$note", note);
+        command.Parameters.AddWithValue("$signature", signature);
+
+        return command.ExecuteNonQuery() > 0;
+    }
+
     /// <summary>데이터베이스 연결을 닫는다.</summary>
     public void Dispose() => _connection.Dispose();
 

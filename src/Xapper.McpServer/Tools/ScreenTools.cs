@@ -110,13 +110,19 @@ public sealed class ScreenTools
         if (profile is null)
             return error ?? NoProfile;
 
+        // 비고를 주지 않았다면 이미 적어 둔 것을 그대로 둔다. 덮어쓰면 앞서 알아낸 함정이 소리 없이 사라지고,
+        // 다시 배우는 쪽은 그런 것이 있었는지조차 모른다(실측: 이름만 주고 다시 배우자 비고가 비었다).
         var trimmedNotes = notes?.Trim();
+        var keptNotes = string.IsNullOrEmpty(trimmedNotes)
+            ? _store.Find(profile.Signature)?.Notes
+            : trimmedNotes;
+
         var record = new ScreenRecord
         {
             Signature = profile.Signature,
             App = ActiveAppName(),
             Name = name.Trim(),
-            Notes = string.IsNullOrEmpty(trimmedNotes) ? null : trimmedNotes,
+            Notes = string.IsNullOrEmpty(keptNotes) ? null : keptNotes,
             Regions = profile.Regions.Where(IsWorthStoring).Select(ToRegion).ToList()
         };
 
@@ -148,6 +154,44 @@ public sealed class ScreenTools
         return !string.IsNullOrEmpty(mark.AutomationId)
             || !string.IsNullOrEmpty(mark.Name)
             || !string.IsNullOrEmpty(mark.Anchor);
+    }
+
+    /// <summary>지금 화면의 기록에 비고 한 줄을 덧붙입니다.</summary>
+    [McpServerTool(Name = "xapper_screen_note"), Description(
+        "Add one line of what you have just learned to the record of the screen the app is showing now, without " +
+        "re-learning it. Use it the moment you find something the structure cannot show: what a disabled button " +
+        "waits for, which control refuses text, where a button leads, a dialog that appears outside the visual " +
+        "tree. The regions are left untouched and earlier notes are kept, so later visits get everything. " +
+        "The screen must have been learned first.")]
+    public async Task<string> Note(
+        [Description("One line worth remembering, e.g. 'Undo 버튼은 변경 이력이 하나 이상 있어야 활성화된다'")] string text,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "Error: text is required. Give one line worth remembering about this screen.";
+
+        InspectorClient client;
+        try
+        {
+            client = _sessionManager.GetActive();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+
+        var (profile, error) = await ProfileAsync(client, includeRegions: false, ct);
+        if (profile is null)
+            return error ?? NoProfile;
+
+        if (!_store.AppendNote(profile.Signature, text.Trim()))
+            return $"No screen record exists for the screen you are on (signature {profile.Signature}), so there " +
+                   "is nothing to add the note to. Call xapper_screen_learn first - you can pass the same line " +
+                   "as its notes.";
+
+        _tracker.LastSignature = profile.Signature;
+        return $"Noted on the record for signature {profile.Signature}. " +
+               "xapper_screen_recall will show it on the next visit.";
     }
 
     /// <summary>한 앱의 화면 기록을 모두 지웁니다.</summary>

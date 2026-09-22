@@ -27,15 +27,20 @@ internal static class ScreenRecallSummary
         var sb = new StringBuilder();
         sb.AppendLine($"Known screen: {record.Name}  ({Provenance(record)})");
 
-        if (record.Regions.Count == 0)
-        {
-            sb.AppendLine("No regions were recorded for it; look with xapper_screenshot(annotate: true).");
-        }
-        else
+        // 셀렉터가 하나도 없는 기록은 "스크린샷 없이 조작하라" 고 말할 자격이 없다. 좌표 몇 줄로는 그렇게
+        // 할 수 없는데도 그 문장이 잘못된 확신을 준다(실측: 기준점 여섯 줄짜리 기록을 받은 직후 스크린샷을
+        // 찍었다). 그럴 때는 기록이 얇다고 밝히고 다시 배우게 한다. 비고는 그래도 값이 있으므로 남긴다.
+        if (record.Regions.Any(region => !string.IsNullOrWhiteSpace(region.Selector)))
         {
             sb.AppendLine("Act on these without a screenshot:");
             foreach (var region in record.Regions)
                 sb.AppendLine("  " + Describe(region));
+        }
+        else
+        {
+            sb.AppendLine(
+                "The record holds nothing a selector can reach, so it cannot stand in for looking. Look once " +
+                "with xapper_screenshot(annotate: true) and call xapper_screen_learn again to replace it.");
         }
 
         if (!string.IsNullOrWhiteSpace(record.Notes))

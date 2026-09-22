@@ -52,7 +52,9 @@ public sealed class CaptureTools
         "to see how something is drawn. To read what a panel or a grid currently holds, call xapper_snapshot with " +
         "rootRef set to it: that returns the same content as text for a fraction of the cost. To check one value, " +
         "call xapper_get_property or xapper_assert. When you do take a picture, narrow it with ref instead of " +
-        "capturing the whole window at full size; with annotate a narrow shot also keeps the numbers readable.")]
+        "capturing the whole window at full size - ref narrows both modes, so choosing screen to catch a dialog " +
+        "does not force a full-desktop shot. Only annotate is render-only; with annotate a narrow shot also " +
+        "keeps the numbers readable.")]
     public async Task<IEnumerable<ContentBlock>> Screenshot(
         [Description("Element ref to capture (omit for the whole window)")] int? @ref = null,
         [Description("Shrink to at most this many pixels wide, keeping the aspect ratio (omit for full size)")] int? maxWidth = null,

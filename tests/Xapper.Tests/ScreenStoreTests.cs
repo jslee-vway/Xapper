@@ -31,6 +31,59 @@ public class ScreenStoreTests : IDisposable
     };
 
     [Fact]
+    public void AppendNote_AddsToWhatWasAlreadyThere()
+    {
+        using var store = NewStore();
+        store.Save(Record("aaa"));
+
+        Assert.True(store.AppendNote("aaa", "Undo 버튼은 변경 이력이 있어야 활성화된다"));
+
+        var found = store.Find("aaa");
+        Assert.NotNull(found);
+        Assert.Contains("메모", found.Notes);
+        Assert.Contains("Undo 버튼은 변경 이력이 있어야 활성화된다", found.Notes);
+    }
+
+    [Fact]
+    public void AppendNote_FillsTheNotes_WhenThereWereNone()
+    {
+        using var store = NewStore();
+        var record = Record("aaa");
+        record.Notes = null;
+        store.Save(record);
+
+        store.AppendNote("aaa", "첫 줄");
+
+        var found = store.Find("aaa");
+        Assert.NotNull(found);
+        Assert.Equal("첫 줄", found.Notes);
+    }
+
+    [Fact]
+    public void AppendNote_SaysSo_WhenNoRecordMatches()
+    {
+        using var store = NewStore();
+
+        Assert.False(store.AppendNote("없는지문", "아무 말"));
+    }
+
+    [Fact]
+    public void AppendNote_LeavesTheRegionsAlone()
+    {
+        // 비고를 남기려고 다시 배우게 하면 영역까지 다시 뽑히고, 그 사이 화면이 조금만 달라져도
+        // 기록이 통째로 바뀐다. 이 길은 비고만 건드린다.
+        using var store = NewStore();
+        store.Save(Record("aaa"));
+
+        store.AppendNote("aaa", "덧붙인 줄");
+
+        var found = store.Find("aaa");
+        Assert.NotNull(found);
+        Assert.Equal(2, found.Regions.Count);
+        Assert.Equal("id=Save", found.Regions[0].Selector);
+    }
+
+    [Fact]
     public void Find_AfterSave_ReturnsWhatWasStored()
     {
         using var store = NewStore();

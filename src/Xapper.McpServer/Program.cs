@@ -40,8 +40,8 @@ else
 // 반복하지 않도록 여기에만 둔다.
 var serverInstructions = """
     Load these tools together before you start, not one at a time: xapper_screen_recall, xapper_screen_learn,
-    xapper_run, xapper_launch, xapper_find, xapper_click, xapper_type, xapper_key, xapper_get_property,
-    xapper_assert, xapper_element_at, xapper_screenshot. The first three are the ones agents forget, and they
+    xapper_screen_note, xapper_run, xapper_launch, xapper_find, xapper_snapshot, xapper_click, xapper_type,
+    xapper_key, xapper_get_property, xapper_assert, xapper_element_at, xapper_screenshot. The first three are the ones agents forget, and they
     are the ones that cut the most work: recall replaces a screenshot on a screen you have seen before, run
     replaces a whole chain of calls, and launch replaces attaching.
 
@@ -91,6 +91,9 @@ var serverInstructions = """
     On arriving at a screen, call xapper_screen_recall first. A known screen comes back with the selectors and
     anchors you need, so you can act without a screenshot. An unknown or changed screen is the signal to look
     once with xapper_screenshot(annotate: true) and then xapper_screen_learn it, so the next visit is free.
+    Whenever you then learn something the structure cannot show - what a disabled button waits for, a control
+    that refuses text, a dialog that lives outside the visual tree - put it on the record with
+    xapper_screen_note. Most of what is worth remembering is found by acting, not by arriving.
 
     Attach first: xapper_list_processes, then xapper_attach. Attaching again to a process you are already
     attached to is rejected, but the rejection surfaces only after the injection attempt, as a connect

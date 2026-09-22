@@ -20,6 +20,33 @@ public class ScreenRecallSummaryTests
     };
 
     [Fact]
+    public void Known_RefusesToPromiseAnythingFromARecordWithNoSelector()
+    {
+        // 좌표 몇 줄만 들고 "스크린샷 없이 조작하라" 고 말하면 잘못된 확신을 준다.
+        // 실측에서 기준점 여섯 줄짜리 기록을 받은 에이전트가 바로 다음 호출로 스크린샷을 찍었다.
+        var record = Record();
+        record.Regions =
+        [
+            new ScreenRegion { Type = "BarItemLinkInfo", Anchor = "name=RootGrid", AnchorX = 0.06, AnchorY = 0.39 }
+        ];
+
+        var text = ScreenRecallSummary.Known(record);
+
+        Assert.DoesNotContain("Act on these without a screenshot", text);
+        Assert.Contains("xapper_screen_learn", text);
+    }
+
+    [Fact]
+    public void Known_KeepsTheNotes_EvenWhenTheRecordIsTooThinToActOn()
+    {
+        // 영역이 쓸모없어도 비고는 값이 있다. 함정을 적어 둔 줄이 여기서 사라지면 다시 겪는다.
+        var record = Record();
+        record.Regions = [new ScreenRegion { Type = "Grid", Anchor = "id=Panel", AnchorX = 0.5, AnchorY = 0.5 }];
+
+        Assert.Contains("저장은 Ctrl+S 로도 된다", ScreenRecallSummary.Known(record));
+    }
+
+    [Fact]
     public void Known_NamesTheScreenAndListsHowToReachEachRegion()
     {
         var text = ScreenRecallSummary.Known(Record());
