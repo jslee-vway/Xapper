@@ -13,6 +13,12 @@ public sealed class WpfProcessInjector
     private readonly string _inspectorBaseDir;
     private readonly NativeInjector _nativeInjector;
 
+    /// <summary>Inspector 가 제공하는 가장 높은 런타임 세대. 앱이 이보다 새로우면 이 세대의 빌드를 쓴다.</summary>
+    private const int HighestSupportedMajor = 9;
+
+    /// <summary>Inspector 가 제공하는 가장 낮은 런타임 세대.</summary>
+    private const int LowestSupportedMajor = 6;
+
     #endregion
 
     #region Constructor
@@ -62,6 +68,33 @@ public sealed class WpfProcessInjector
             inspectorDllPath,
             "Xapper.Inspector.EntryPoint",
             "Initialize");
+    }
+
+    /// <summary>
+    /// 아직 띄우지 않은 exe 에 startup hook 으로 얹을 Inspector DLL 경로를 정합니다.
+    /// 앱 런타임보다 높은 TFM 으로 빌드된 어셈블리는 로드되지 않으므로, 앱의 세대에서 시작해 아래로만 내려간다.
+    /// </summary>
+    /// <param name="exePath">대상 앱의 실행 파일 경로.</param>
+    /// <exception cref="InvalidOperationException">runtimeconfig.json 을 읽을 수 없어 .NET Core 앱인지 알 수 없는 경우.</exception>
+    /// <exception cref="FileNotFoundException">쓸 수 있는 Inspector 빌드가 없는 경우.</exception>
+    public string ResolveInspectorDllForExe(string exePath)
+    {
+        var major = LaunchTargetFramework.MajorVersionOf(exePath);
+        if (major is null)
+            throw new InvalidOperationException(
+                $"'{Path.GetFileName(exePath)}' does not look like a framework-dependent .NET application " +
+                "(no readable runtimeconfig.json next to it). .NET Framework and self-contained apps cannot be " +
+                "launched this way - start the app yourself and use xapper_attach.");
+
+        for (var candidate = Math.Min(major.Value, HighestSupportedMajor); candidate >= LowestSupportedMajor; candidate--)
+        {
+            var path = Path.Combine(_inspectorBaseDir, $"net{candidate}.0-windows", "Xapper.Inspector.dll");
+            if (File.Exists(path))
+                return path;
+        }
+
+        throw new FileNotFoundException(
+            $"No Inspector build for .NET {major} or lower in {_inspectorBaseDir}.");
     }
 
     /// <summary>
