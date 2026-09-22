@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using ModelContextProtocol.Server;
 using Xapper.Injector;
 using Xapper.McpServer.Infrastructure;
+using Xapper.Protocol;
 
 namespace Xapper.McpServer.Tools;
 
@@ -16,6 +18,9 @@ public sealed class ProcessTools
     private readonly SessionManager _sessionManager;
     private readonly WpfProcessInjector _injector;
     private readonly IOperatorNotice _notice;
+
+    /// <summary>띄운 앱의 파이프가 생겼는지 다시 확인하는 간격 (밀리초).</summary>
+    private const int PipePollMs = 50;
 
     #endregion
 
@@ -105,6 +110,98 @@ public sealed class ProcessTools
         }
 
         return $"Attached to process {pid}. Connection verified.";
+    }
+
+    /// <summary>
+    /// 앱을 직접 띄우되 Inspector 가 이미 들어간 채로 시작하게 합니다.
+    /// .NET 런타임의 startup hook 은 앱의 진입점보다 먼저 돌므로 주입 절차도, 그 뒤의 고정 대기도 필요 없고
+    /// 스플래시·로그인 창처럼 주 창보다 먼저 뜨는 화면도 사정권에 들어온다.
+    /// </summary>
+    [McpServerTool(Name = "xapper_launch"), Description(
+        "Start a WPF app with the inspector already inside it, then attach. Prefer this over xapper_attach " +
+        "whenever you can start the app yourself: there is no injection step, so it is faster, and it catches " +
+        "the app from its first moment - splash screens and login dialogs that open before the main window. " +
+        "The launched app becomes the active session; xapper_detach later disconnects without closing it. " +
+        "Framework-dependent .NET apps only - for .NET Framework or self-contained builds, start the app " +
+        "yourself and use xapper_attach.")]
+    public async Task<string> Launch(
+        [Description("Absolute path to the app's .exe")] string exePath,
+        [Description("Command-line arguments to pass to the app")] string? args = null,
+        [Description("Timeout in ms to wait for the app's inspector to come up (default 15000)")] int timeoutMs = 15000,
+        CancellationToken ct = default)
+    {
+        if (!File.Exists(exePath))
+            return $"Error: no file at {exePath}.";
+
+        string hookDll;
+        try
+        {
+            hookDll = _injector.ResolveInspectorDllForExe(exePath);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
+        {
+            return $"Error: {ex.Message}";
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = exePath,
+            // 환경변수를 넘기려면 셸을 거치지 않아야 한다. 작업 디렉터리는 exe 폴더 — WPF 앱이 리소스를
+            // 상대 경로로 찾는 것이 보통이다.
+            UseShellExecute = false,
+            WorkingDirectory = Path.GetDirectoryName(exePath) ?? Environment.CurrentDirectory
+        };
+        if (!string.IsNullOrWhiteSpace(args))
+            startInfo.Arguments = args;
+        startInfo.Environment["DOTNET_STARTUP_HOOKS"] = hookDll;
+
+        Process? started;
+        try
+        {
+            started = Process.Start(startInfo);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return $"Error: could not start {Path.GetFileName(exePath)} ({ex.Message}).";
+        }
+
+        if (started is null)
+            return $"Error: could not start {Path.GetFileName(exePath)}.";
+
+        using var process = started;
+        var name = Path.GetFileNameWithoutExtension(exePath);
+        var watch = Stopwatch.StartNew();
+        var pipePath = $@"\\.\pipe\{IpcPipeNames.ForProcess(process.Id)}";
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(timeoutMs);
+
+        try
+        {
+            // 훅은 진입점보다 먼저 돌지만 CLR 기동 자체에 시간이 걸린다. 고정 대기 대신 파이프가 생기는 즉시 붙는다.
+            while (!File.Exists(pipePath))
+            {
+                if (process.HasExited)
+                    return $"Error: {name} exited with code {process.ExitCode} before the inspector came up.";
+
+                await Task.Delay(PipePollMs, timeoutCts.Token);
+            }
+
+            await _sessionManager.AttachAsync(process.Id, timeoutCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return $"Error: the inspector in {name} (pid {process.Id}) did not come up within {timeoutMs} ms. " +
+                   "The app is running - you can retry with xapper_attach.";
+        }
+        catch (Exception ex)
+        {
+            return $"Error: connecting to {name} (pid {process.Id}) failed ({ex.Message}).";
+        }
+
+        watch.Stop();
+        return $"Launched process {process.Id} ({name}) in {watch.Elapsed.TotalSeconds:F1} s. " +
+               "The app may still be starting; UI tools wait for its WPF Application.";
     }
 
     /// <summary>
