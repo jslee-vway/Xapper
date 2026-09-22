@@ -76,18 +76,34 @@ public static class ScreenRegionPicker
             if (element.Visibility != Visibility.Visible)
                 return;
 
-            // 컨트롤 템플릿이 만든 부품은 앱 작성자가 놓은 것이 아니라 스크롤바나 편집기의 내부 구조다.
-            // 기록에 담아도 다음 방문에 쓸 일이 없고, 자리만 차지해 정작 필요한 컨트롤을 밀어낸다.
-            //
-            // 다만 부품 자신만 빼고 그 아래로는 계속 내려가야 한다. 창의 내용물은 창 템플릿 안쪽
-            // ContentPresenter 아래에 놓이므로, 여기서 가지를 끊으면 앱 화면 전체를 놓친다
-            // (실측: 요소 576개짜리 VisualPro 화면에서 셀렉터를 가진 영역이 0개였다).
-            if (element is not FrameworkElement { TemplatedParent: not null })
+            if (!IsChrome(element))
                 seen.Add((element, id, name));
         }
 
         foreach (var child in VisualTree.VisualChildren.Of(node, depth: 0, []))
             Collect(child, seen, idCounts, nameCounts);
+    }
+
+    /// <summary>
+    /// 이 요소가 컨트롤의 내부 구조인지 판단합니다. 스크롤바의 PART_Track 이나 창 테두리처럼
+    /// 앱 작성자가 놓지 않은 부품은 기록에 담아도 다음 방문에 쓸 일이 없고, 자리만 차지해 정작 필요한
+    /// 컨트롤을 밀어낸다.
+    ///
+    /// 가르는 기준은 "누가 이 요소를 만들었는가" 다. 컨트롤 템플릿이 만든 부품은 그 컨트롤 자신을
+    /// 템플릿 부모로 가리키는 반면, DataTemplate 이 만든 내용물은 그것을 얹은 ContentPresenter 를
+    /// 가리킨다(실측으로 확인). 그래서 템플릿 부모가 컨트롤일 때만 내부 구조로 본다.
+    /// 템플릿 부모가 있다는 사실만으로 걸러내면 DataTemplate 안에 놓인 앱 화면까지 통째로 사라진다.
+    /// </summary>
+    private static bool IsChrome(UIElement element)
+    {
+        try
+        {
+            return element is FrameworkElement { TemplatedParent: System.Windows.Controls.Control };
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>

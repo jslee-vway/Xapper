@@ -146,6 +146,38 @@ public class ScreenRegionPickerTests
     }
 
     [Fact]
+    public void Pick_KeepsContentADataTemplateBuilt()
+    {
+        StaThread.Run(() =>
+        {
+            // DataTemplate 이 만든 요소도 템플릿 부모를 가진다. 다만 그 부모는 컨트롤이 아니라
+            // 내용을 얹은 ContentPresenter 다. 앱 화면은 도킹 레이아웃이나 ItemTemplate 을 통해
+            // 이렇게 놓이는 일이 흔하므로, 템플릿 부모가 있다는 것만으로 걸러내면 화면이 통째로 사라진다.
+            var dataTemplate = new DataTemplate();
+            var content = new FrameworkElementFactory(typeof(Border));
+            content.SetValue(FrameworkElement.WidthProperty, 140.0);
+            content.SetValue(FrameworkElement.HeightProperty, 36.0);
+            content.SetValue(Border.BackgroundProperty, Brushes.LightGreen);
+            content.SetValue(System.Windows.Automation.AutomationProperties.AutomationIdProperty, "AppPane");
+            dataTemplate.VisualTree = content;
+
+            var host = new ContentControl
+            {
+                Width = 200,
+                Height = 80,
+                Content = "데이터",
+                ContentTemplate = dataTemplate
+            };
+            Canvas.SetLeft(host, 10);
+            Canvas.SetTop(host, 10);
+
+            var canvas = BuildCanvas(400, 300, host);
+
+            Assert.Equal(["AppPane"], IdsOf(ScreenRegionPicker.Pick(canvas, maxRegions: 50)));
+        });
+    }
+
+    [Fact]
     public void Pick_SkipsAnIdThatIsNotUnique()
     {
         StaThread.Run(() =>

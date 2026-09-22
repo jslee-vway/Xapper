@@ -1299,7 +1299,8 @@ public sealed class IpcServer
             Anchor = anchored?.Anchor,
             AnchorX = anchored?.AnchorX,
             AnchorY = anchored?.AnchorY,
-            FromTemplate = (element as FrameworkElement)?.TemplatedParent is not null
+            // 판단 기준은 ScreenRegionPicker.IsChrome 과 같다. 템플릿 부모가 컨트롤이면 그 컨트롤의 내부 구조다.
+            FromTemplate = (element as FrameworkElement)?.TemplatedParent is System.Windows.Controls.Control
         };
     }
 
