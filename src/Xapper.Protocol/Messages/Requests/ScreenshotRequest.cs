@@ -13,6 +13,9 @@ public sealed class ScreenshotRequest
 
     /// <summary>캡처 방식. <see cref="ScreenshotModes"/>의 값 중 하나이며, 비어 있으면 렌더 방식.</summary>
     public string? Mode { get; set; }
+
+    /// <summary>true 면 히트테스트로 닿을 수 있는 요소에 번호 상자를 그리고 번호마다 ref 를 발급한다. 렌더 방식에서만 유효.</summary>
+    public bool Annotate { get; set; }
 }
 
 /// <summary>

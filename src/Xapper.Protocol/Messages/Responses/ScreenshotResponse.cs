@@ -25,4 +25,10 @@ public sealed class ScreenshotResponse
 
     /// <summary>화면 1픽셀이 그림에서 차지하는 픽셀 수. 축소하지 않았으면 1.</summary>
     public double Scale { get; set; } = 1.0;
+
+    /// <summary>그림에 그린 번호 상자 목록. annotate 를 켜지 않았으면 빈 목록.</summary>
+    public List<ScreenMark> Marks { get; set; } = [];
+
+    /// <summary>상한을 넘어 그리지 않은 요소 수. 없으면 0.</summary>
+    public int MarksOmitted { get; set; }
 }
