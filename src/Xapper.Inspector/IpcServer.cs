@@ -423,6 +423,7 @@ public sealed class IpcServer
                 "getProperty" => await HandleGetProperty(message),
                 "getBindings" => await HandleGetBindings(message),
                 "screenshot" => await HandleScreenshot(message),
+                "screenProfile" => await HandleScreenProfile(message),
                 "assert" => await HandleAssert(message),
                 "find" => await HandleFind(message),
                 "elementAt" => await HandleElementAt(message),
@@ -1218,6 +1219,61 @@ public sealed class IpcServer
         var response = await Application.Current.Dispatcher.InvokeAsync(() => isScreen
             ? CaptureFromScreen(target, request.MaxWidth)
             : CaptureByRendering(target, request.MaxWidth, request.Annotate));
+
+        return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
+    /// 현재 화면의 지문과, 요청하면 조작할 수 있는 영역 목록을 돌려줍니다.
+    /// 지문은 주 창만으로 낸다 — 팝업과 메뉴는 각자 최상위 창이라 섞이면 같은 화면이 여러 지문으로 갈라진다.
+    /// </summary>
+    private async Task<IpcMessage> HandleScreenProfile(IpcMessage message)
+    {
+        var request = message.Payload is { } payload
+            ? IpcSerializer.DeserializePayload<ScreenProfileRequest>(payload)
+            : new ScreenProfileRequest();
+
+        var response = await Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            var window = Application.Current.MainWindow;
+            if (window is null)
+                return null;
+
+            var profile = new ScreenProfileResponse
+            {
+                Signature = VisualTree.ScreenSignature.Of(window),
+                ElementCount = VisualTree.ScreenSignature.CountOf(window)
+            };
+
+            if (!request.IncludeRegions)
+                return profile;
+
+            var bounds = System.Windows.Media.VisualTreeHelper.GetDescendantBounds(window);
+            var candidates = Capture.MarkPicker.Pick(
+                window, bounds, MaxScreenshotMarks, MinScreenshotMarkSize, out _);
+
+            foreach (var candidate in candidates)
+            {
+                profile.Regions.Add(new ScreenMark
+                {
+                    Number = candidate.Number,
+                    Ref = _refRegistry.Register(candidate.Element),
+                    Type = candidate.Element.GetType().Name,
+                    Name = (candidate.Element as FrameworkElement)?.Name is { Length: > 0 } name ? name : null,
+                    AutomationId = System.Windows.Automation.AutomationProperties.GetAutomationId(candidate.Element),
+                    Text = VisualTree.ElementText.Of(candidate.Element),
+                    Anchor = candidate.Anchor,
+                    AnchorX = candidate.AnchorX,
+                    AnchorY = candidate.AnchorY
+                });
+            }
+
+            return profile;
+        });
+
+        if (response is null)
+            return IpcSerializer.CreateError(message.Id,
+                "The app has no main window yet, so there is no screen to fingerprint.");
 
         return IpcSerializer.CreateResponse(message.Id, response);
     }
