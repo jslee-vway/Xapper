@@ -97,7 +97,7 @@ src/
 ├── Xapper.Protocol        IPC 메시지 계약 (net6.0~9.0-windows, WPF 무의존)
 ├── Xapper.Injector        네이티브 인젝터 (P/Invoke로 DLL 주입)
 ├── Xapper.Inspector       인젝션 라이브러리 (net6.0~9.0-windows 멀티타겟)
-└── Xapper.McpServer       MCP 서버 (stdio transport, 25개 도구)
+└── Xapper.McpServer       MCP 서버 (stdio transport, 26개 도구)
 tests/
 ├── Xapper.TestApp         샘플 WPF 로그인 폼
 └── Xapper.Tests           단위 테스트 (xUnit)
@@ -114,6 +114,7 @@ Inspector와 GenericInjector DLL은 McpServer에 **임베디드 리소스로 내
 ### **1. 프로세스 탐색 및 인젝션**
 - `xapper_list_processes` : 실행 중인 WPF 프로세스 목록 조회
 - `xapper_attach` : P/Invoke 네이티브 인젝션으로 대상 프로세스에 Inspector DLL 주입
+- `xapper_launch` : 앱을 직접 띄우면서 Inspector 를 함께 태운다. .NET 런타임의 startup hook(`DOTNET_STARTUP_HOOKS`)이 앱의 진입점보다 먼저 돌므로 주입 절차도, 그 뒤의 고정 2초 대기도 없어 attach 보다 빠르고(TestApp 실측 launch 0.9초 vs attach 2.1~2.8초), 주 창보다 먼저 뜨는 스플래시·로그인 창까지 사정권에 들어온다. 띄운 앱이 활성 세션이 되며 `xapper_detach` 는 연결만 끊는다(앱은 계속 실행). framework-dependent .NET 앱만 지원 — .NET Framework·self-contained 빌드는 직접 띄운 뒤 `xapper_attach` 를 쓴다
 - `xapper_detach` : Named Pipe 연결 해제 및 정리
 - Named Pipe 기반 IPC (4바이트 LE 길이 접두사 + UTF-8 JSON)
 - 응답을 끝까지 읽지 못한 연결은 이후 메시지 경계가 어긋나므로 폐기된다. 다음 호출은 재부착을 요구하는 오류를 낸다

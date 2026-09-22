@@ -77,6 +77,9 @@ var serverInstructions = """
     Attach first: xapper_list_processes, then xapper_attach. Attaching again to a process you are already
     attached to is rejected, but the rejection surfaces only after the injection attempt, as a connect
     failure - so detach before re-attaching rather than retrying.
+    When you can start the app yourself, xapper_launch is better than attaching: it loads the inspector before
+    the app's entry point, so there is no injection step and screens that appear before the main window -
+    splash, login - are reachable too.
 
     Element refs come from xapper_snapshot and xapper_find. Only xapper_snapshot resets them, and it does
     more than invalidate: it also restarts numbering from 1, so a ref you obtained before a snapshot may
