@@ -210,6 +210,7 @@ public class MarkPickerTests
             Assert.Equal("id=LoginPanel", mark.Anchor);
             // 상자 중심은 패널 안에서 가로 (80+20)/200 = 0.5, 세로 (40+10)/100 = 0.5 이다.
             Assert.NotNull(mark.AnchorX);
+            Assert.NotNull(mark.AnchorY);
             Assert.Equal(0.5, mark.AnchorX.Value, precision: 2);
             Assert.Equal(0.5, mark.AnchorY.Value, precision: 2);
         });

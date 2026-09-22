@@ -39,6 +39,18 @@ else
 // 서버 전체에 걸친 사용 지침. MCP 규격이 초기화 때 한 번 전달하는 자리로, 도구 설명에 같은 문장을
 // 반복하지 않도록 여기에만 둔다.
 var serverInstructions = """
+    Load these tools together before you start, not one at a time: xapper_screen_recall, xapper_screen_learn,
+    xapper_run, xapper_launch, xapper_find, xapper_click, xapper_type, xapper_key, xapper_get_property,
+    xapper_assert, xapper_element_at, xapper_screenshot. The first three are the ones agents forget, and they
+    are the ones that cut the most work: recall replaces a screenshot on a screen you have seen before, run
+    replaces a whole chain of calls, and launch replaces attaching.
+
+    Two habits waste far more than anything else. Do not screenshot to check whether an action worked - the
+    action's own response already says what happened, and xapper_get_property or xapper_assert confirms a value
+    for a fraction of the tokens an image costs. Do not screenshot to find a control - xapper_find and target
+    selectors do that live, and when a control has no id, name or text, one xapper_screenshot with
+    annotate: true hands you a ref for every clickable thing at once.
+
     Xapper drives a WPF application by injecting into its process and walking the real visual tree, not the
     UI Automation tree. Seeing and acting are not equally unconstrained, and the difference matters:
 
