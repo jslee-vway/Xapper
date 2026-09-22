@@ -40,15 +40,43 @@ you, and it is worth more than the picture you saved.
 ## 3. Act, and read the response
 
 Every action reports which path it took and what happened. Read that instead of taking a picture to
-find out. When an action refuses, the message names the single condition that blocked it:
+find out.
+
+**Click never refuses, so its word alone means little.** It tries an accessibility pattern, then a
+button click event, and failing both it raises simulated routed mouse events at any UIElement -
+reporting success either way. On a control that offers nothing, click is the action that still does
+something. Read the path named in the response rather than trusting the word "Clicked". When the
+element needs genuine input - it hit-tests, captures the mouse, or handles `MouseDown` rather than
+`MouseLeftButtonDown` - pass `x`/`y` so real mouse messages are delivered.
+
+**Five actions can refuse outright.** `type`, `toggle`, `expand`, `select` and `scroll` each try an
+accessibility pattern and one stock WPF type, and say the element does not support the action when
+neither fits. A custom control that looks like a text box may well not be one; when `type` refuses,
+click into it with `x`/`y` and send `xapper_key` instead.
+
+**The cursor usually stays the person's.** Coordinate clicks and most drags run inside the target
+process: real window messages with the OS cursor reads briefly spoofed, so WPF accepts them as
+genuine while the physical pointer never moves. The person can keep working. Only when that path
+cannot be set up does Xapper fall back to real mouse input, which does move the pointer and take
+focus - and the response says which one ran. When you expect the real one, call
+`xapper_notice_show` first so a banner warns the person off, and `xapper_notice_hide` when that
+stretch is done.
+
+When an action refuses, the message names the single condition that blocked it:
 
 | What it says | What it means | What to do |
 |---|---|---|
 | `stayed disabled` | the app itself refuses the action | a longer timeout will not help; find what enables the control, or accept that the action is unavailable here |
 | `stayed hidden` | it is not on screen | open the tab, pane or dialog holding it first |
 | `was still loading` | the view has not settled | raise the timeout, or act later |
-| `cannot be resolved` | the ref is stale | `xapper_snapshot` discards every earlier ref; take fresh ones. `xapper_find` does not discard |
+| `cannot be resolved` | the ref is stale, or its element left the tree as virtualized rows and closed dialogs do | take fresh refs |
 | `matches N elements` | the selector is ambiguous | add a second clause, or pass a ref |
+
+**A ref outlives its meaning, which is worse than failing.** `xapper_snapshot` does not merely
+invalidate earlier refs - it restarts numbering from 1, so a ref taken before a snapshot may now
+resolve to a *different* element and act on it without complaint. Use refs from the most recent
+snapshot, and prefer target selectors when a sequence spans one. `xapper_find` leaves existing refs
+alone and only hands out new numbers.
 
 Send a sequence as one call rather than one tool call per step, and check the result once at the
 end rather than between steps. Two tools do this:
