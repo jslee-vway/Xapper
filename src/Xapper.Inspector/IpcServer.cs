@@ -38,6 +38,12 @@ public sealed class IpcServer
     /// <summary>Application 이 생겼는지 다시 묻는 간격.</summary>
     private static readonly TimeSpan ApplicationWaitPoll = TimeSpan.FromMilliseconds(50);
 
+    /// <summary>annotate 스크린샷에 그릴 번호 상자의 최대 개수. 넘으면 면적이 작은 것을 남긴다.</summary>
+    private const int MaxScreenshotMarks = 40;
+
+    /// <summary>번호 상자를 그릴 최소 너비·높이 (DIP). 더 작으면 번호를 얹을 자리가 없다.</summary>
+    private const double MinScreenshotMarkSize = 16;
+
     #endregion
 
     #region Constructor
@@ -1201,17 +1207,66 @@ public sealed class IpcServer
                 $"Unknown screenshot mode \"{mode}\". Use \"{ScreenshotModes.Render}\" to redraw the visual " +
                 $"tree, or \"{ScreenshotModes.Screen}\" to read what is on the desktop.");
 
+        // annotate 는 캡처 대상의 DIP 좌표계에 상자를 겹쳐 그리는 방식이라 렌더 경로에서만 정확하다.
+        // 화면 픽셀을 읽는 경로는 WPF 좌표계와 잇는 변환을 손으로 해야 하고, 그쪽이 필요한 대상(컨텍스트 메뉴,
+        // 드롭다운)은 각자 최상위 창이라 find 와 snapshot 이 이미 보여 준다.
+        if (request.Annotate && isScreen)
+            return IpcSerializer.CreateError(message.Id,
+                $"annotate works with mode=\"{ScreenshotModes.Render}\" only. Popups and menus live in their own " +
+                "top-level windows, so xapper_find and xapper_snapshot already list them.");
+
         var response = await Application.Current.Dispatcher.InvokeAsync(() => isScreen
             ? CaptureFromScreen(target, request.MaxWidth)
-            : CaptureByRendering(target, request.MaxWidth));
+            : CaptureByRendering(target, request.MaxWidth, request.Annotate));
 
         return IpcSerializer.CreateResponse(message.Id, response);
     }
 
     /// <summary>
     /// 시각 트리를 다시 그려 캡처합니다. 다른 창이 열려 있으면 이 그림에 담기지 않았다는 사실을 함께 알립니다.
+    /// annotate 를 켜면 히트테스트로 닿을 수 있는 요소에 번호 상자를 그리고, 번호마다 ref 를 발급한다.
     /// </summary>
-    private static ScreenshotResponse CaptureByRendering(UIElement? element, int? maxWidth)
+    /// <param name="element">캡처할 요소. null 이면 주 창 전체를 찍는다.</param>
+    /// <param name="maxWidth">인코딩할 최대 가로 픽셀 수. null 이면 축소하지 않는다.</param>
+    /// <param name="annotate">true 면 번호 상자를 그리고 번호마다 ref 를 발급한다.</param>
+    private ScreenshotResponse CaptureByRendering(UIElement? element, int? maxWidth, bool annotate)
+    {
+        var captured = element ?? Application.Current.MainWindow;
+        if (captured is null || !annotate)
+            return CaptureWithoutMarks(element, maxWidth);
+
+        var bounds = System.Windows.Media.VisualTreeHelper.GetDescendantBounds(captured);
+        var candidates = Capture.MarkPicker.Pick(
+            captured, bounds, MaxScreenshotMarks, MinScreenshotMarkSize, out var omitted);
+
+        var response = element is null
+            ? RenderCapture.CaptureWindow(maxWidth: maxWidth, marks: candidates)
+            : RenderCapture.CaptureElement(element, maxWidth, candidates);
+
+        response.MarksOmitted = omitted;
+        foreach (var candidate in candidates)
+        {
+            response.Marks.Add(new ScreenMark
+            {
+                Number = candidate.Number,
+                Ref = _refRegistry.Register(candidate.Element),
+                Type = candidate.Element.GetType().Name,
+                Name = (candidate.Element as FrameworkElement)?.Name is { Length: > 0 } name ? name : null,
+                AutomationId = System.Windows.Automation.AutomationProperties.GetAutomationId(candidate.Element),
+                Text = VisualTree.ElementText.Of(candidate.Element)
+            });
+        }
+
+        return response;
+    }
+
+    /// <summary>
+    /// 번호 상자 없이 시각 트리를 다시 그려 캡처합니다.
+    /// 다른 창이 열려 있으면 이 그림에 담기지 않았다는 사실을 함께 알립니다.
+    /// </summary>
+    /// <param name="element">캡처할 요소. null 이면 주 창 전체를 찍는다.</param>
+    /// <param name="maxWidth">인코딩할 최대 가로 픽셀 수. null 이면 축소하지 않는다.</param>
+    private static ScreenshotResponse CaptureWithoutMarks(UIElement? element, int? maxWidth)
     {
         var response = element is not null
             ? RenderCapture.CaptureElement(element, maxWidth)

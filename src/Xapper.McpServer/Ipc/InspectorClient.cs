@@ -227,9 +227,12 @@ public sealed class InspectorClient : IAsyncDisposable
     }
 
     /// <summary>윈도우 또는 요소의 스크린샷을 캡처합니다.</summary>
-    public async Task<IpcMessage> ScreenshotAsync(int? @ref = null, int? maxWidth = null, string? mode = null, CancellationToken ct = default)
+    /// <param name="annotate">true 면 닿을 수 있는 요소에 번호 상자를 그리고 번호마다 ref 를 받는다.</param>
+    public async Task<IpcMessage> ScreenshotAsync(
+        int? @ref = null, int? maxWidth = null, string? mode = null, bool annotate = false,
+        CancellationToken ct = default)
     {
-        var payload = new { @ref, maxWidth, mode };
+        var payload = new { @ref, maxWidth, mode, annotate };
         var request = IpcSerializer.CreateRequest("screenshot", payload);
         return await SendAsync(request, ct);
     }
