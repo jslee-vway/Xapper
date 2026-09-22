@@ -44,6 +44,12 @@ public sealed class IpcServer
     /// <summary>번호 상자를 그릴 최소 너비·높이 (DIP). 더 작으면 번호를 얹을 자리가 없다.</summary>
     private const double MinScreenshotMarkSize = 16;
 
+    /// <summary>화면 기록에 담을, 셀렉터로 지목되는 요소의 최대 개수.</summary>
+    private const int MaxScreenRegions = 50;
+
+    /// <summary>화면 기록에 덧붙일, 셀렉터가 없어 기준점으로만 지목되는 요소의 최대 개수.</summary>
+    private const int MaxAnchoredScreenRegions = 15;
+
     #endregion
 
     #region Constructor
@@ -1248,26 +1254,20 @@ public sealed class IpcServer
             if (!request.IncludeRegions)
                 return profile;
 
-            var bounds = System.Windows.Media.VisualTreeHelper.GetDescendantBounds(window);
-            var candidates = Capture.MarkPicker.Pick(
-                window, bounds, MaxScreenshotMarks, MinScreenshotMarkSize, out _);
+            // 셀렉터로 지목되는 요소가 기록의 본체다. 트리를 그대로 훑어 모으며, 히트테스트를 거치지 않는다.
+            foreach (var element in Capture.ScreenRegionPicker.Pick(window, MaxScreenRegions))
+                profile.Regions.Add(DescribeRegion(element, profile.Regions.Count + 1, null));
 
-            foreach (var candidate in candidates)
-            {
-                profile.Regions.Add(new ScreenMark
-                {
-                    Number = candidate.Number,
-                    Ref = _refRegistry.Register(candidate.Element),
-                    Type = candidate.Element.GetType().Name,
-                    Name = (candidate.Element as FrameworkElement)?.Name is { Length: > 0 } name ? name : null,
-                    AutomationId = System.Windows.Automation.AutomationProperties.GetAutomationId(candidate.Element),
-                    Text = VisualTree.ElementText.Of(candidate.Element),
-                    Anchor = candidate.Anchor,
-                    AnchorX = candidate.AnchorX,
-                    AnchorY = candidate.AnchorY,
-                    FromTemplate = (candidate.Element as FrameworkElement)?.TemplatedParent is not null
-                });
-            }
+            // 이름이 없어 셀렉터로 잡히지 않는 요소는 기준점과 상대 좌표로만 남길 수 있다. 그런 요소를
+            // 가려내려면 "클릭이 닿는가" 를 따져야 하므로 여기서만 annotate 와 같은 고르기를 쓴다.
+            var bounds = System.Windows.Media.VisualTreeHelper.GetDescendantBounds(window);
+            var anchored = Capture.MarkPicker.Pick(
+                    window, bounds, MaxScreenshotMarks, MinScreenshotMarkSize, out _)
+                .Where(candidate => candidate.Anchor is not null)
+                .Take(MaxAnchoredScreenRegions);
+
+            foreach (var candidate in anchored)
+                profile.Regions.Add(DescribeRegion(candidate.Element, profile.Regions.Count + 1, candidate));
 
             return profile;
         });
@@ -1277,6 +1277,30 @@ public sealed class IpcServer
                 "The app has no main window yet, so there is no screen to fingerprint.");
 
         return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
+    /// 요소 하나를 화면 기록에 담을 모양으로 옮깁니다.
+    /// ref 를 함께 발급하는 이유는, 기록을 조회한 직후 그대로 조작해 볼 수 있게 하기 위해서다.
+    /// </summary>
+    /// <param name="element">기록에 담을 요소.</param>
+    /// <param name="number">기록 안에서의 일련번호. 1부터 센다.</param>
+    /// <param name="anchored">기준점으로만 지목되는 요소라면 그 후보. 셀렉터가 있는 요소는 null.</param>
+    private ScreenMark DescribeRegion(UIElement element, int number, Capture.MarkCandidate? anchored)
+    {
+        return new ScreenMark
+        {
+            Number = number,
+            Ref = _refRegistry.Register(element),
+            Type = element.GetType().Name,
+            Name = (element as FrameworkElement)?.Name is { Length: > 0 } name ? name : null,
+            AutomationId = System.Windows.Automation.AutomationProperties.GetAutomationId(element),
+            Text = VisualTree.ElementText.Of(element),
+            Anchor = anchored?.Anchor,
+            AnchorX = anchored?.AnchorX,
+            AnchorY = anchored?.AnchorY,
+            FromTemplate = (element as FrameworkElement)?.TemplatedParent is not null
+        };
     }
 
     /// <summary>
