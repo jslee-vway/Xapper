@@ -188,6 +188,11 @@ writing them all at the end also loses every one of them if the session ends fir
 One fact per line. Lines are appended unless you pass `replace`, and the regions are left untouched
 either way.
 
+**When a screenshot response starts counting, stop and write.** From the second picture of a screen
+with nothing recorded since, the response says which number this is. That count is the signal: what
+the earlier pictures told you exists only in this conversation and goes when it does. Write the
+note before the next call, not at the end of the task.
+
 **Every screenshot response tells you where you stand.** It says either that this screen is already
 learned - in which case recall its selectors rather than looking again - or that it is not in the
 record yet, which means the moment you finish looking is the moment to learn it. Act on that line;
