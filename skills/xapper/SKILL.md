@@ -100,6 +100,14 @@ resolve to a *different* element and act on it without complaint. Use refs from 
 snapshot, and prefer target selectors when a sequence spans one. `xapper_find` leaves existing refs
 alone and only hands out new numbers.
 
+**When you have the app's source, read it.** Working on the app you are testing means its XAML is
+right there, and it answers in seconds what a picture answers slowly. The `x:Name` in a XAML file
+is the same name `target` takes, so grepping for a caption you can see on screen tells you which
+control carries it and what it is called - often the fastest way out of a `find` that keeps coming
+back empty. A `Command` binding tells you what a button does without clicking it, and the file the
+control lives in tells you which screen it belongs to. None of this applies when you are driving
+somebody else's program, where there is no source to read.
+
 **The moment you can name the next two steps, send them together.** Not three, not "a long
 sequence" - two. Typing into a box and pressing Enter is two. Selecting a row and pressing Delete
 is two. One call per keystroke is the single most common way a session doubles in length, and it
