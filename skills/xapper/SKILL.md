@@ -150,7 +150,8 @@ changes - and when it does, call the tool again with `replace` and write the cor
 button opens a dialog, the fact that it does belongs to the screen with the button, so note it
 there rather than after the dialog has taken over.
 
-One fact per line. Lines are appended and the regions are left untouched.
+One fact per line. Lines are appended unless you pass `replace`, and the regions are left untouched
+either way.
 
 **Every screenshot response tells you where you stand.** It says either that this screen is already
 learned - in which case recall its selectors rather than looking again - or that it is not in the

@@ -91,9 +91,13 @@ var serverInstructions = """
     On arriving at a screen, call xapper_screen_recall first. A known screen comes back with the selectors and
     anchors you need, so you can act without a screenshot. An unknown or changed screen is the signal to look
     once with xapper_screenshot(annotate: true) and then xapper_screen_learn it, so the next visit is free.
-    Whenever you then learn something the structure cannot show - what a disabled button waits for, a control
-    that refuses text, a dialog that lives outside the visual tree - put it on the record with
-    xapper_screen_note. Most of what is worth remembering is found by acting, not by arriving.
+    Whenever you then learn something the structure cannot show, put it on the record with xapper_screen_note.
+    Write a standing fact about the screen, not a report of what you did: "Ctrl+Z undoes the last edit here"
+    or "the Add button does nothing unless the search box has text", never "verified undo works today". The
+    test is whether the next agent can act on the line without checking it first. Write it before you navigate
+    away, because the note lands on the screen showing at that moment - a dialog some button raises belongs to
+    the screen with the button, not to the dialog. When a note turns out to be wrong, call the tool again with
+    replace and write the corrected set. Most of what is worth remembering is found by acting, not by arriving.
 
     Attach first: xapper_list_processes, then xapper_attach. Attaching again to a process you are already
     attached to is rejected, but the rejection surfaces only after the injection attempt, as a connect
