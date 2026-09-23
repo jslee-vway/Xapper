@@ -17,7 +17,12 @@ public class ScreenStoreTests : IDisposable
 
     private ScreenStore NewStore() => new(_path);
 
-    private static ScreenRecord Record(string signature, string app = "DemoApp", string name = "화면") => new()
+    /// <summary>
+    /// 시험용 기록 하나. 영역은 <paramref name="screen"/> 을 따라 달라진다.
+    /// 저장소가 같은 영역 집합을 같은 화면으로 보기 때문에, 서로 다른 화면을 뜻하려면 영역도 달라야 한다.
+    /// </summary>
+    private static ScreenRecord Record(
+        string signature, string app = "DemoApp", string name = "화면", string? screen = null) => new()
     {
         Signature = signature,
         App = app,
@@ -25,7 +30,7 @@ public class ScreenStoreTests : IDisposable
         Notes = "메모",
         Regions =
         [
-            new ScreenRegion { Type = "Button", Selector = "id=Save" },
+            new ScreenRegion { Type = "Button", Selector = $"id=Save_{screen ?? signature}" },
             new ScreenRegion { Type = "Grid", Anchor = "id=Panel", AnchorX = 0.5, AnchorY = 0.2 }
         ]
     };
@@ -57,6 +62,92 @@ public class ScreenStoreTests : IDisposable
         var found = store.Find("aaa");
         Assert.NotNull(found);
         Assert.Equal("첫 줄", found.Notes);
+    }
+
+    [Fact]
+    public void Opening_MergesRecordsThatAlreadySharedTheirRegions()
+    {
+        // 열쇠를 더하는 것만으로는 이미 갈라진 기록이 붙지 않는다. 앞으로만 막고 지난 것을 두면 알아낸 사실이
+        // 쪼개진 채로 남아, 어느 쪽으로 들어오느냐에 따라 절반만 읽힌다.
+        using (var before = NewStore())
+        {
+            before.Save(Record("지문하나", name: "선택 전", screen: "같은화면"));
+            before.Save(Record("지문둘", name: "선택 후", screen: "같은화면"));
+        }
+
+        // 두 줄이 되도록 열쇠를 지우고, 다시 열어 합쳐지는지 본다.
+        using (var raw = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_path}"))
+        {
+            raw.Open();
+            using var command = raw.CreateCommand();
+            command.CommandText = @"UPDATE screens SET region_key = NULL;
+                INSERT INTO screens (signature, app, name, notes, learned_at, last_seen_at, seen_count)
+                VALUES ('지문둘', 'DemoApp', '선택 후', '팝업은 스냅샷으로 읽힌다', '2026-01-01', '2026-01-01', 1);
+                INSERT INTO regions (signature, ordinal, type, selector)
+                SELECT '지문둘', ordinal, type, selector FROM regions WHERE signature = '지문하나';";
+            command.ExecuteNonQuery();
+        }
+
+        using var store = NewStore();
+
+        var kept = store.Find("지문하나") ?? store.Find("지문둘");
+        Assert.NotNull(kept);
+        Assert.Contains("팝업은 스냅샷으로 읽힌다", kept.Notes);
+        Assert.True(store.Find("지문하나") is null || store.Find("지문둘") is null);
+    }
+
+    [Fact]
+    public void Save_JoinsARecordThatAlreadyHasTheSameRegions()
+    {
+        // 같은 화면에서 행을 고르거나 목록을 펼치면 인라인 편집기 같은 요소가 트리에 나타나 지문이 갈린다
+        // (실측: 최적화 화면 하나가 지문 셋으로 갈렸고 셋의 영역이 완전히 같았다). 그러면 알아낸 것이 쪼개진다.
+        using var store = NewStore();
+        store.Save(Record("첫번째지문", screen: "같은화면"));
+
+        var storedUnder = store.Save(Record("다른지문", screen: "같은화면"));
+
+        Assert.Equal("첫번째지문", storedUnder);
+        Assert.Null(store.Find("다른지문"));
+        Assert.NotNull(store.Find("첫번째지문"));
+    }
+
+    [Fact]
+    public void FindByRegionKey_ReachesTheRecordWhenTheFingerprintMisses()
+    {
+        using var store = NewStore();
+        store.Save(Record("aaa"));
+
+        var key = ScreenStore.RegionKeyOf(Record("aaa").Regions);
+        Assert.NotNull(key);
+
+        var found = store.FindByRegionKey(key);
+        Assert.NotNull(found);
+        Assert.Equal("aaa", found.Signature);
+    }
+
+    [Fact]
+    public void RegionKeyOf_IgnoresOrderAndRegionsNoSelectorCanReach()
+    {
+        // 순서는 훑는 방향에 따라 달라질 수 있고, 기준점 영역의 좌표는 창 크기에 흔들린다.
+        var one = ScreenStore.RegionKeyOf([
+            new ScreenRegion { Type = "Button", Selector = "id=Save" },
+            new ScreenRegion { Type = "Grid", Selector = "name=List" },
+            new ScreenRegion { Type = "Cell", Anchor = "id=Panel", AnchorX = 0.5, AnchorY = 0.2 }
+        ]);
+        var other = ScreenStore.RegionKeyOf([
+            new ScreenRegion { Type = "Grid", Selector = "name=List" },
+            new ScreenRegion { Type = "Button", Selector = "id=Save" }
+        ]);
+
+        Assert.Equal(one, other);
+    }
+
+    [Fact]
+    public void RegionKeyOf_IsNull_WhenNoSelectorIsThere()
+    {
+        Assert.Null(ScreenStore.RegionKeyOf([
+            new ScreenRegion { Type = "Cell", Anchor = "id=Panel", AnchorX = 0.5, AnchorY = 0.2 }
+        ]));
     }
 
     [Fact]
@@ -104,7 +195,7 @@ public class ScreenStoreTests : IDisposable
         var found = store.Find("aaa");
         Assert.NotNull(found);
         Assert.Equal(2, found.Regions.Count);
-        Assert.Equal("id=Save", found.Regions[0].Selector);
+        Assert.Equal("id=Save_aaa", found.Regions[0].Selector);
     }
 
     [Fact]
@@ -118,7 +209,7 @@ public class ScreenStoreTests : IDisposable
         Assert.NotNull(found);
         Assert.Equal("화면", found.Name);
         Assert.Equal(2, found.Regions.Count);
-        Assert.Equal("id=Save", found.Regions[0].Selector);
+        Assert.Equal("id=Save_aaa", found.Regions[0].Selector);
         Assert.Equal(0.5, found.Regions[1].AnchorX);
     }
 

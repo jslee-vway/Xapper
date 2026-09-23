@@ -85,7 +85,9 @@ public sealed class ScreenTools
         var changed = _tracker.LastSignature is { } previous && previous != profile.Signature;
         _tracker.LastSignature = profile.Signature;
 
-        var record = _store.Find(profile.Signature);
+        // 지문으로 먼저 찾고, 빗나가면 영역 집합으로 한 번 더 찾는다. 같은 화면에서 행을 고르거나 목록을
+        // 펼치면 인라인 편집기 같은 요소가 트리에 나타나 지문이 갈리는데, 이름 있는 컨트롤의 집합은 그대로다.
+        var record = _store.Find(profile.Signature) ?? FindByRegions(profile);
         if (record is null)
             return ScreenRecallSummary.Unknown(profile.Signature, changed);
 
@@ -147,13 +149,31 @@ public sealed class ScreenTools
             Regions = profile.Regions.Where(IsWorthStoring).Select(ToRegion).ToList()
         };
 
-        _store.Save(record);
+        // 같은 영역 집합을 가진 기록이 이미 있으면 저장소가 그 줄에 쓴다. 그때는 기록이 붙은 지문이 달라진다.
+        var storedUnder = _store.Save(record);
         _tracker.LastSignature = profile.Signature;
         _tracker.Recorded(profile.Signature);
 
         return $"Learned \"{record.Name}\" for {record.App} (signature {record.Signature}): " +
                $"{record.Regions.Count} region(s) out of {profile.ElementCount} elements. " +
+               (storedUnder == profile.Signature
+                   ? ""
+                   : "It joined the record already held for this screen under another fingerprint, so what was " +
+                     "noted there is yours too. ") +
                "Call xapper_screen_recall on the next visit instead of taking a screenshot.";
+    }
+
+    /// <summary>
+    /// 지금 화면의 영역 집합으로 기록을 찾습니다. 지문이 빗나갔을 때만 부른다.
+    /// 같은 화면이 상태에 따라 여러 지문으로 갈리더라도 이름 있는 컨트롤의 집합은 같으므로, 그것을 열쇠로 삼는다.
+    /// </summary>
+    /// <param name="profile">지금 화면의 프로필.</param>
+    private ScreenRecord? FindByRegions(ScreenProfileResponse profile)
+    {
+        var regions = profile.Regions.Where(IsWorthStoring).Select(ToRegion).ToList();
+        var key = ScreenStore.RegionKeyOf(regions);
+
+        return key is null ? null : _store.FindByRegionKey(key);
     }
 
     /// <summary>

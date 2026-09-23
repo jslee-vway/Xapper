@@ -26,7 +26,11 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
     <PackageReference Include="ModelContextProtocol" Version="1.2.0" />
     <PackageReference Include="Jint" Version="4.16.3" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <!-- 윈도우 10 부터 운영체제가 winsqlite3.dll 을 들고 있으므로 네이티브 SQLite 를 함께 나르지 않는다.
+         Microsoft.Data.Sqlite 를 그대로 쓰면 bundle_e_sqlite3 가 딸려 와, 윈도우 전용 도구인데도
+         게시할 때 리눅스·macOS·웹어셈블리 바이너리까지 runtimes 아래 폴더 52 개로 퍼진다. -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.12" />
+    <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.1.11" />
   </ItemGroup>
 
   <!-- 인젝션 페이로드 임베딩: GenericInjector + 멀티타겟 Inspector 빌드 출력물 -->

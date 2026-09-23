@@ -71,6 +71,160 @@ public sealed class ScreenStore : IDisposable
               PRIMARY KEY (signature, ordinal)
             );
             """);
+
+        AddRegionKeyColumnIfMissing();
+    }
+
+    /// <summary>
+    /// 이미 만들어져 있는 데이터베이스에 region_key 열을 붙인다. 새로 만든 것에는 CREATE 문에 없으므로 여기서 함께 붙인다.
+    ///
+    /// 이 열이 필요한 이유는 지문 하나가 화면 하나를 뜻하지 않기 때문이다. 같은 화면에서 행을 고르거나 목록을
+    /// 펼치면 인라인 편집기 같은 요소가 트리에 나타나 지문이 갈린다(실측: 같은 최적화 화면이 지문 셋으로 갈렸고,
+    /// 셋의 영역 열일곱 개가 완전히 같았다). 그러면 같은 화면을 세 번 배우고 알아낸 것이 셋으로 쪼개진다.
+    /// 영역 셀렉터의 집합은 그런 상태 변화에 흔들리지 않으므로, 지문이 빗나갔을 때 기댈 두 번째 열쇠가 된다.
+    /// </summary>
+    private void AddRegionKeyColumnIfMissing()
+    {
+        var present = false;
+        using (var columns = _connection.CreateCommand())
+        {
+            columns.CommandText = "PRAGMA table_info(screens);";
+            using var reader = columns.ExecuteReader();
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), "region_key", StringComparison.Ordinal))
+                    present = true;
+            }
+        }
+
+        if (!present)
+            Execute("ALTER TABLE screens ADD COLUMN region_key TEXT;");
+
+        Execute("CREATE INDEX IF NOT EXISTS idx_screens_region_key ON screens(region_key);");
+
+        BackfillRegionKeys();
+        MergeRecordsSharingRegions();
+    }
+
+    /// <summary>
+    /// 열쇠가 비어 있는 기존 기록에 영역 열쇠를 채운다.
+    /// 채우지 않으면 예전에 배운 화면은 두 번째 길로 영영 찾아지지 않는다.
+    /// </summary>
+    private void BackfillRegionKeys()
+    {
+        var pending = new List<string>();
+        using (var command = _connection.CreateCommand())
+        {
+            command.CommandText = "SELECT signature FROM screens WHERE region_key IS NULL;";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+                pending.Add(reader.GetString(0));
+        }
+
+        foreach (var signature in pending)
+        {
+            var key = RegionKeyOf(SelectorsOf(signature).Select(selector => new ScreenRegion
+            {
+                Type = "",
+                Selector = selector
+            }));
+
+            if (key is null)
+                continue;
+
+            using var update = _connection.CreateCommand();
+            update.CommandText = "UPDATE screens SET region_key = $key WHERE signature = $signature;";
+            update.Parameters.AddWithValue("$key", key);
+            update.Parameters.AddWithValue("$signature", signature);
+            update.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>
+    /// 같은 영역 집합을 가진 기록이 여럿이면 하나로 합친다.
+    ///
+    /// 열쇠를 더하는 것만으로는 이미 갈라진 기록이 붙지 않는다. 앞으로만 막고 지난 것을 두면, 알아낸 사실이
+    /// 쪼개진 채로 남아 어느 쪽으로 들어오느냐에 따라 절반만 읽힌다(실측: 최적화 화면 하나가 셋으로 갈렸고
+    /// 팝업을 스냅샷으로 읽을 수 있다는 사실이 그중 하나에만 있었다).
+    ///
+    /// 가장 최근에 본 줄을 남기고 나머지의 비고를 잇는다. 같은 줄은 한 번만 남긴다.
+    /// </summary>
+    private void MergeRecordsSharingRegions()
+    {
+        var groups = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        using (var command = _connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT region_key, signature FROM screens
+                 WHERE region_key IS NOT NULL
+                 ORDER BY last_seen_at DESC;
+                """;
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var key = reader.GetString(0);
+                if (!groups.TryGetValue(key, out var members))
+                    groups[key] = members = [];
+
+                members.Add(reader.GetString(1));
+            }
+        }
+
+        foreach (var members in groups.Values.Where(members => members.Count > 1))
+            MergeInto(members[0], members.Skip(1).ToList());
+    }
+
+    /// <summary>남길 기록에 나머지의 비고를 잇고 나머지를 지운다.</summary>
+    private void MergeInto(string keep, List<string> drop)
+    {
+        var lines = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var signature in drop.Prepend(keep))
+        {
+            foreach (var line in (NotesOf(signature) ?? "").Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.Length > 0 && seen.Add(trimmed))
+                    lines.Add(trimmed);
+            }
+        }
+
+        if (lines.Count > 0)
+            ReplaceNotes(keep, string.Join('\n', lines));
+
+        foreach (var signature in drop)
+        {
+            using var delete = _connection.CreateCommand();
+            delete.CommandText = "DELETE FROM screens WHERE signature = $signature;";
+            delete.Parameters.AddWithValue("$signature", signature);
+            delete.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>한 화면에 저장된 셀렉터 목록.</summary>
+    private List<string> SelectorsOf(string signature)
+    {
+        var selectors = new List<string>();
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT selector FROM regions WHERE signature = $signature AND selector IS NOT NULL;";
+        command.Parameters.AddWithValue("$signature", signature);
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            selectors.Add(reader.GetString(0));
+
+        return selectors;
+    }
+
+    /// <summary>한 화면의 비고. 없으면 null.</summary>
+    private string? NotesOf(string signature)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT notes FROM screens WHERE signature = $signature;";
+        command.Parameters.AddWithValue("$signature", signature);
+
+        return command.ExecuteScalar() as string;
     }
 
     #endregion
@@ -113,18 +267,42 @@ public sealed class ScreenStore : IDisposable
     /// 화면만 있고 영역이 없는 반쪽 상태가 남지 않도록 전부 한 트랜잭션으로 묶는다.
     /// </summary>
     /// <param name="record">저장할 기록.</param>
-    public void Save(ScreenRecord record)
+    public string Save(ScreenRecord record)
     {
         if (record is null)
             throw new ArgumentNullException(nameof(record));
 
         using var transaction = _connection.BeginTransaction();
 
-        UpsertScreen(record);
+        var regionKey = RegionKeyOf(record.Regions);
+
+        // 같은 영역 집합을 가진 기록이 이미 있으면 그 줄에 쓴다. 지문만 보고 새로 만들면 같은 화면이 상태에
+        // 따라 여러 줄로 갈라지고, 알아낸 것이 그만큼 쪼개진다(실측: 최적화 화면 하나가 셋으로 갈렸다).
+        var target = regionKey is null ? null : ExistingSignatureFor(regionKey, record.Signature);
+        if (target is not null)
+            record.Signature = target;
+
+        UpsertScreen(record, regionKey);
         ReplaceRegions(record);
         EnforceCap(record.App);
 
         transaction.Commit();
+        return record.Signature;
+    }
+
+    /// <summary>같은 영역 열쇠를 가진 다른 기록의 지문. 없으면 null.</summary>
+    private string? ExistingSignatureFor(string regionKey, string signature)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = """
+            SELECT signature FROM screens
+             WHERE region_key = $key AND signature <> $signature
+             ORDER BY last_seen_at DESC LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$key", regionKey);
+        command.Parameters.AddWithValue("$signature", signature);
+
+        return command.ExecuteScalar() as string;
     }
 
     /// <summary>
@@ -188,6 +366,50 @@ public sealed class ScreenStore : IDisposable
         return command.ExecuteNonQuery() > 0;
     }
 
+    /// <summary>
+    /// 영역 목록에서 두 번째 열쇠를 만든다. 셀렉터만 정렬해 쓰며, 하나도 없으면 null 이다.
+    ///
+    /// 좌표를 넣지 않는 이유는 창 크기나 배율이 조금만 달라도 값이 흔들리기 때문이다. 이름 있는 컨트롤의
+    /// 집합은 그런 것에 흔들리지 않으면서도 화면을 충분히 가른다.
+    /// </summary>
+    /// <param name="regions">화면의 영역 목록.</param>
+    public static string? RegionKeyOf(IEnumerable<ScreenRegion> regions)
+    {
+        var selectors = regions
+            .Select(region => region.Selector)
+            .Where(selector => !string.IsNullOrWhiteSpace(selector))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(selector => selector, StringComparer.Ordinal)
+            .ToList();
+
+        if (selectors.Count == 0)
+            return null;
+
+        var joined = string.Join('\n', selectors);
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(joined));
+        return Convert.ToHexString(hash)[..16].ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// 같은 영역 집합을 가진 기록을 찾는다. 지문이 빗나갔을 때 기대는 두 번째 길이다.
+    /// 둘 이상이면 가장 최근에 본 것을 돌려준다.
+    /// </summary>
+    /// <param name="regionKey">찾을 영역 열쇠.</param>
+    /// <returns>기록. 없으면 null.</returns>
+    public ScreenRecord? FindByRegionKey(string regionKey)
+    {
+        string? signature;
+        using (var command = _connection.CreateCommand())
+        {
+            command.CommandText =
+                "SELECT signature FROM screens WHERE region_key = $key ORDER BY last_seen_at DESC LIMIT 1;";
+            command.Parameters.AddWithValue("$key", regionKey);
+            signature = command.ExecuteScalar() as string;
+        }
+
+        return signature is null ? null : Find(signature);
+    }
+
     /// <summary>데이터베이스 연결을 닫는다.</summary>
     public void Dispose() => _connection.Dispose();
 
@@ -210,18 +432,20 @@ public sealed class ScreenStore : IDisposable
     }
 
     /// <summary>화면 줄을 넣거나, 이미 있으면 갱신한다. 처음 기록한 시각과 조회 횟수는 건드리지 않는다.</summary>
-    private void UpsertScreen(ScreenRecord record)
+    private void UpsertScreen(ScreenRecord record, string? regionKey)
     {
         using var command = _connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO screens (signature, app, name, notes, learned_at, last_seen_at, seen_count)
-            VALUES ($signature, $app, $name, $notes, $now, $now, 1)
+            INSERT INTO screens (signature, app, name, notes, learned_at, last_seen_at, seen_count, region_key)
+            VALUES ($signature, $app, $name, $notes, $now, $now, 1, $regionKey)
             ON CONFLICT(signature) DO UPDATE SET
               app = excluded.app,
               name = excluded.name,
               notes = excluded.notes,
-              last_seen_at = excluded.last_seen_at;
+              last_seen_at = excluded.last_seen_at,
+              region_key = excluded.region_key;
             """;
+        command.Parameters.AddWithValue("$regionKey", (object?)regionKey ?? DBNull.Value);
         command.Parameters.AddWithValue("$signature", record.Signature);
         command.Parameters.AddWithValue("$app", record.App);
         command.Parameters.AddWithValue("$name", record.Name);
@@ -256,7 +480,9 @@ public sealed class ScreenStore : IDisposable
             insert.Parameters.AddWithValue("$anchor", (object?)region.Anchor ?? DBNull.Value);
             insert.Parameters.AddWithValue("$anchorX", (object?)region.AnchorX ?? DBNull.Value);
             insert.Parameters.AddWithValue("$anchorY", (object?)region.AnchorY ?? DBNull.Value);
-            insert.Parameters.AddWithValue("$text", (object?)region.Text ?? DBNull.Value);
+            // 텍스트는 적지 않는다. 배울 때의 값이라 데이터가 바뀌면 거짓이 되고, 조회는 언제나 지금 화면에서
+            // 다시 읽어 채우므로 저장된 값이 쓰일 자리가 없다.
+            insert.Parameters.AddWithValue("$text", DBNull.Value);
             insert.ExecuteNonQuery();
         }
     }
