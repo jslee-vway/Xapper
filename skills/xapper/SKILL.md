@@ -84,8 +84,8 @@ is two. One call per keystroke is the single most common way a session doubles i
 buys nothing: check the result once at the end rather than between steps.
 
 ```json
-[{"tool": "click",  "target": "name=SearchText"},
- {"tool": "type",   "target": "name=SearchText", "text": "고장"},
+[{"tool": "click",  "target": "name=FilterBox"},
+ {"tool": "type",   "target": "name=FilterBox", "text": "draft"},
  {"tool": "key",    "key": "Enter"},
  {"tool": "assert", "target": "name=ResultCount", "propertyName": "Text", "expected": "3"}]
 ```
