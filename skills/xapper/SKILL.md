@@ -33,11 +33,11 @@ An unknown screen is the signal to look once, and only once.
 Read what comes back rather than skimming it. Every line is something you would otherwise have to
 work out:
 
-- **A line that starts with a selector** - `name=treeViewFunctions  TreeViewControl` - goes
-  straight into `target`.
+- **A line that starts with a selector** - `name=OrderList  ListBox` - goes straight into `target`.
 - **A line reading `in X at a,b`** has no selector of its own. Act on it with `target=X` and
   `x=a`, `y=b`. Those are fractions of X, not pixels, so they keep working when the window is
-  resized or the display scales.
+  resized or the display scales. The type at the end of such a line is the element you are aiming
+  at, not X itself.
 - **The notes are standing facts**, worked out by earlier visits so that this one does not have to.
   Act on them instead of confirming them: a note saying a dialog can appear is the reason you do
   not need a picture to find out. If one turns out to be wrong, rewrite it with `replace` - a note

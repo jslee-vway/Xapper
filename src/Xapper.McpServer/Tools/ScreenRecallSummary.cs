@@ -41,7 +41,8 @@ internal static class ScreenRecallSummary
             if (record.Regions.Any(region => string.IsNullOrWhiteSpace(region.Selector)))
                 sb.AppendLine(
                     "A line reading \"in X at a,b\" has no selector of its own: act on it with target=X and " +
-                    "x=a, y=b, which are fractions of X, not pixels.");
+                    "x=a, y=b, which are fractions of X, not pixels. The type that follows is the element you " +
+                    "are aiming at, not X.");
         }
         else
         {
