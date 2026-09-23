@@ -36,8 +36,13 @@ else
     genericInjectorDir = envInjectorDir ?? extractor.GenericInjectorDir;
 }
 
-// 서버 전체에 걸친 사용 지침. MCP 규격이 초기화 때 한 번 전달하는 자리로, 도구 설명에 같은 문장을
-// 반복하지 않도록 여기에만 둔다.
+// 서버 전체에 걸친 사용 지침. MCP 규격이 초기화 때 한 번 전달하는 자리다.
+//
+// 안내가 놓이는 자리가 셋이고 각각 읽히는 시점이 다르므로, 무엇을 어디에 둘지 기준을 정해 두었다.
+// 이 지침은 늘 전달되지만 쓰는 순간에서 가장 멀어 잘 잊히므로 전체 흐름과 도구 사이의 관계만 담는다.
+// 도구 하나를 어떻게 쓰고 그 응답을 어떻게 읽는지는 그 도구의 설명이 맡는다. 부르는 순간에 함께 읽히고,
+// 그 도구를 쓰면서 그 설명을 못 볼 수는 없기 때문이다. 작업 전체의 절차는 skills/xapper 가 맡는다.
+// 가장 강하지만 불려야만 읽히므로, 그것이 없어도 되도록 앞의 둘이 스스로 서 있어야 한다.
 var serverInstructions = """
     Load these tools together before you start, not one at a time: xapper_screen_recall, xapper_screen_learn,
     xapper_screen_note, xapper_run, xapper_launch, xapper_find, xapper_snapshot, xapper_click, xapper_type,
@@ -88,19 +93,11 @@ var serverInstructions = """
     summary. Explore first with find/snapshot, then drive with a script. Prefer id/name selectors and waitUntil
     over sleep, so the same script can be re-run.
 
-    On arriving at a screen, call xapper_screen_recall first, and again every time the screen changes. A known
-    screen comes back with the selectors and anchors you need, so you can act without a screenshot. Read the
-    answer: a line starting with a selector goes into target as it stands, while a line reading "in X at a,b"
-    has none of its own and is acted on with target=X and x=a, y=b, which are fractions of X rather than
-    pixels. The notes are standing facts earlier visits worked out - act on them instead of finding out again. An unknown or changed screen is the signal to look
-    once with xapper_screenshot(annotate: true) and then xapper_screen_learn it, so the next visit is free.
-    Whenever you then learn something the structure cannot show, put it on the record with xapper_screen_note.
-    Write a standing fact about the screen, not a report of what you did: "Ctrl+Z undoes the last edit here"
-    or "the Add button does nothing unless the search box has text", never "verified undo works today". The
-    test is whether the next agent can act on the line without checking it first. Write it before you navigate
-    away, because the note lands on the screen showing at that moment - a dialog some button raises belongs to
-    the screen with the button, not to the dialog. When a note turns out to be wrong, call the tool again with
-    replace and write the corrected set. Most of what is worth remembering is found by acting, not by arriving.
+    Screens are worth remembering, and the three screen tools carry the rules for doing it - what a record
+    holds, how to read one, what belongs in a note. Keep to the rhythm: call xapper_screen_recall every time
+    the screen changes rather than once at the start; look at an unknown screen once and xapper_screen_learn
+    it; and put what acting teaches you on the record with xapper_screen_note before you move on. Most of what
+    is worth remembering is found by acting, not by arriving.
 
     Attach first: xapper_list_processes, then xapper_attach. Attaching again to a process you are already
     attached to is rejected, but the rejection surfaces only after the injection attempt, as a connect
