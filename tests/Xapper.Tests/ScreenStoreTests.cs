@@ -76,6 +76,30 @@ public class ScreenStoreTests : IDisposable
     }
 
     [Fact]
+    public void ReplaceNotes_SwapsTheWholeText()
+    {
+        // 덧붙이기만 있으면 틀린 줄을 바로잡을 길이 없어, 한 번 잘못 적힌 사실이 계속 읽힌다.
+        using var store = NewStore();
+        store.Save(Record("aaa"));
+        store.AppendNote("aaa", "Undo 버튼은 늘 활성 상태다");
+
+        Assert.True(store.ReplaceNotes("aaa", "Undo 버튼은 변경 이력이 있어야 활성화된다"));
+
+        var found = store.Find("aaa");
+        Assert.NotNull(found);
+        Assert.Equal("Undo 버튼은 변경 이력이 있어야 활성화된다", found.Notes);
+        Assert.DoesNotContain("늘 활성 상태", found.Notes);
+    }
+
+    [Fact]
+    public void ReplaceNotes_SaysSo_WhenNoRecordMatches()
+    {
+        using var store = NewStore();
+
+        Assert.False(store.ReplaceNotes("없는지문", "아무 말"));
+    }
+
+    [Fact]
     public void AppendNote_SaysSo_WhenNoRecordMatches()
     {
         using var store = NewStore();

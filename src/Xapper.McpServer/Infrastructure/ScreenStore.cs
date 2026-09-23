@@ -172,6 +172,23 @@ public sealed class ScreenStore : IDisposable
     }
 
     /// <summary>
+    /// 이미 있는 기록의 비고를 통째로 새 것으로 갈아 끼운다.
+    /// 덧붙이기만 있으면 틀린 줄을 바로잡을 길이 없어, 한 번 잘못 적힌 사실이 계속 읽히며 다음 판단을 흐린다.
+    /// </summary>
+    /// <param name="signature">비고를 갈아 끼울 화면의 지문.</param>
+    /// <param name="notes">새 비고 전체.</param>
+    /// <returns>그 지문의 기록이 있어 바꿨으면 true.</returns>
+    public bool ReplaceNotes(string signature, string notes)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "UPDATE screens SET notes = $notes WHERE signature = $signature;";
+        command.Parameters.AddWithValue("$notes", notes);
+        command.Parameters.AddWithValue("$signature", signature);
+
+        return command.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>
     /// 한 화면의 영역을 모두 지운다. 이름과 비고는 남긴다.
     /// 셀렉터가 하나도 없는 영역 묶음은 다시 방문할 때 도움이 되기는커녕 응답만 채우고 잘못된 확신을 준다.
     /// 그렇다고 기록째 지우면 함께 적어 둔 비고까지 사라지므로, 쓸모없는 쪽만 덜어낸다.

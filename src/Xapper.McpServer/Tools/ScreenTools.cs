@@ -99,7 +99,7 @@ public sealed class ScreenTools
         "screen with xapper_screenshot(annotate: true) and understood it.")]
     public async Task<string> Learn(
         [Description("One line saying what this screen is, e.g. '로그인 화면' or '주문 목록 - 검색 조건 펼친 상태'")] string name,
-        [Description("Anything worth remembering that the structure cannot show: a gotcha, a shortcut, where a button leads. Optional")] string? notes = null,
+        [Description("What is true about this screen that its structure cannot show: which shortcut does what, what a button needs before it works, a dialog that can appear from here. Write standing facts, not what you just did. Optional")] string? notes = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -165,19 +165,24 @@ public sealed class ScreenTools
             || !string.IsNullOrEmpty(mark.Anchor);
     }
 
-    /// <summary>지금 화면의 기록에 비고 한 줄을 덧붙입니다.</summary>
+    /// <summary>지금 화면의 기록에 비고를 덧붙이거나, 있던 비고를 갈아 끼웁니다.</summary>
     [McpServerTool(Name = "xapper_screen_note"), Description(
-        "Add one line of what you have just learned to the record of the screen the app is showing now, without " +
-        "re-learning it. Use it the moment you find something the structure cannot show: what a disabled button " +
-        "waits for, which control refuses text, where a button leads, a dialog that appears outside the visual " +
-        "tree. The regions are left untouched and earlier notes are kept, so later visits get everything. " +
+        "Write down how this screen behaves, so the next visit can act on it without finding out again. " +
+        "Note a standing fact about the screen, not a report of what you did: 'Ctrl+Z undoes the last edit here', " +
+        "'the Add button does nothing unless the search box has text', 'opening a project from here can raise a " +
+        "backup-recovery dialog that the visual tree does not show', 'the X icon in the tree deletes and asks to " +
+        "confirm'. A line that begins with a date or with what you verified is worth nothing later; a line the " +
+        "next agent can act on without checking is worth the call. " +
+        "The note lands on the screen showing right now, so write it before you navigate away. Lines are " +
+        "appended and the regions are untouched; pass replace to rewrite the notes when one has gone stale. " +
         "The screen must have been learned first.")]
     public async Task<string> Note(
-        [Description("One line worth remembering, e.g. 'Undo 버튼은 변경 이력이 하나 이상 있어야 활성화된다'")] string notes,
+        [Description("What is true about this screen, one fact per line, e.g. 'Ctrl+Z 는 여기서 마지막 편집을 되돌린다'")] string notes,
+        [Description("Replace the existing notes instead of appending. Use it when a note has become wrong, and include everything still true")] bool replace = false,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(notes))
-            return "Error: notes is required. Give one line worth remembering about this screen.";
+            return "Error: notes is required. Say what is true about this screen.";
 
         InspectorClient client;
         try
@@ -193,13 +198,17 @@ public sealed class ScreenTools
         if (profile is null)
             return error ?? NoProfile;
 
-        if (!_store.AppendNote(profile.Signature, notes.Trim()))
+        var written = replace
+            ? _store.ReplaceNotes(profile.Signature, notes.Trim())
+            : _store.AppendNote(profile.Signature, notes.Trim());
+
+        if (!written)
             return $"No screen record exists for the screen you are on (signature {profile.Signature}), so there " +
-                   "is nothing to add the note to. Call xapper_screen_learn first - you can pass the same line " +
+                   "is nothing to note against. Call xapper_screen_learn first - you can pass the same lines " +
                    "as its notes.";
 
         _tracker.LastSignature = profile.Signature;
-        return $"Noted on the record for signature {profile.Signature}. " +
+        return $"{(replace ? "Rewrote the notes" : "Noted")} on the record for signature {profile.Signature}. " +
                "xapper_screen_recall will show it on the next visit.";
     }
 

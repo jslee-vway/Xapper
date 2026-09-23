@@ -109,7 +109,10 @@ Choose by what you actually need to know:
 - **How is it drawn?** Only then a picture: layout, rendering, a chart, a control that paints itself.
 
 When you do take one, narrow it with `ref`. That works in both modes, so choosing `mode="screen"`
-to catch a dialog does not force a full-desktop shot. Only `annotate` is render-only.
+to catch a dialog does not force a full-desktop shot. Only `annotate` is render-only. You almost
+always have a ref to narrow with: the `xapper_find` that located the thing you are about to look at
+handed you one, and on a learned screen the record's selectors point at every panel worth framing.
+Reach for the whole window only when what you need to see is the whole window.
 
 Some controls genuinely cannot be read as text. High-performance grids - DevExpress `GridControl`
 and `TreeList` among them - paint their cells without creating a visual element per cell, so their
@@ -127,15 +130,27 @@ selectors for a fraction of what a picture costs, in this session and in every l
 those selectors are what let you batch a whole flow instead of stepping through it.
 
 **`xapper_screen_note` whenever you find something out.** Most of what is worth remembering is not
-visible on arrival - it surfaces when you act:
+visible on arrival - it surfaces when you act.
 
-- what a disabled button is waiting for
-- a control that refuses typed text, and what works instead
-- a dialog that lives outside the visual tree and needs real mouse input
-- which grid paints its cells and therefore needs a picture
-- where a button actually leads
+Write a standing fact about the screen, not a report of your session. The test is simple: could the
+next agent act on this line without checking it first?
 
-One line each. The note is appended, so earlier notes survive, and the regions are left untouched.
+| Write this | Not this |
+|---|---|
+| Ctrl+Z undoes the last edit here, Ctrl+Y redoes it | On 2026-09-23 I verified that undo works |
+| The Add button does nothing unless the search box has text | Clicked Add and nothing happened |
+| Opening a project from here can raise a backup-recovery dialog the visual tree does not show | A dialog appeared so I took a screenshot |
+| The X icon in the row's toolbar deletes, and asks to confirm | Deleted a row to test undo |
+| This grid paints its cells, so its contents need a picture | Could not find the cell text |
+
+A dated verification log ages into noise. A fact about the screen stays true until the screen
+changes - and when it does, call the tool again with `replace` and write the corrected set.
+
+**Write the note before you navigate away.** It lands on the screen showing at that moment. If a
+button opens a dialog, the fact that it does belongs to the screen with the button, so note it
+there rather than after the dialog has taken over.
+
+One fact per line. Lines are appended and the regions are left untouched.
 
 **Every screenshot response tells you where you stand.** It says either that this screen is already
 learned - in which case recall its selectors rather than looking again - or that it is not in the
@@ -165,3 +180,5 @@ These are the habits that actually cost sessions, each seen in a real transcript
   read asking why.
 - Nine arrow keys and an Enter sent as ten separate calls, then again as seven, when each run was a
   straight line known in advance and would have been one `xapper_batch`.
+- The same confirmation dialog met on three separate runs and screenshotted every time, because no
+  note ever said it could appear.
