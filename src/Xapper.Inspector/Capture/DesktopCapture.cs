@@ -18,6 +18,31 @@ public static class DesktopCapture
 {
     #region Win32
 
+    private const int MONITOR_DEFAULTTONEAREST = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(POINT pt, int flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+
     [DllImport("user32.dll")]
     private static extern IntPtr GetDC(IntPtr hWnd);
 
@@ -195,23 +220,94 @@ public static class DesktopCapture
     /// </summary>
     private static Int32Rect? UnionOfWindowBounds()
     {
-        int? left = null, top = null, right = null, bottom = null;
+        var rects = new List<Int32Rect>();
 
         foreach (var handle in TopLevelWindowHandles())
         {
             if (!GetWindowRect(handle, out var rect))
                 continue;
 
-            left = left is null ? rect.Left : Math.Min(left.Value, rect.Left);
-            top = top is null ? rect.Top : Math.Min(top.Value, rect.Top);
-            right = right is null ? rect.Right : Math.Max(right.Value, rect.Right);
-            bottom = bottom is null ? rect.Bottom : Math.Max(bottom.Value, rect.Bottom);
+            rects.Add(new Int32Rect(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top));
         }
 
-        if (left is null || top is null || right is null || bottom is null)
+        return RegionAroundTheMainWindow(rects, DisplayHolding(rects));
+    }
+
+    /// <summary>
+    /// 앱의 창들이 차지한 사각형들에서 실제로 찍을 영역을 정합니다.
+    ///
+    /// 전부 합치면 안 된다. 앱이 다른 화면에 창 하나를 떨궈 두면 그 사이의 모든 것이 함께 담겨, 앱을 찍으려던
+    /// 그림에 남의 프로그램이 절반을 차지한다(실측: 가로 4000픽셀이 넘는 그림에 대상 앱이 오른쪽 3분의 1만
+    /// 차지했다).
+    ///
+    /// 그렇다고 주 창과 겹치는 것만 남기면 창 아래로 펼쳐지는 드롭다운처럼 곁에 뜨는 것을 놓친다. 그래서
+    /// 기준을 화면 한 장으로 잡는다. 주 창이 놓인 화면 안에 있는 창은 담고, 그 밖으로 나간 창은 버린다.
+    /// </summary>
+    /// <param name="windows">앱의 보이는 최상위 창들이 차지한 사각형.</param>
+    /// <param name="display">주 창이 놓인 화면의 사각형. 모르면 null 이며, 그때는 겹치는 창만 담는다.</param>
+    /// <returns>찍을 영역. 쓸 만한 창이 하나도 없으면 null.</returns>
+    internal static Int32Rect? RegionAroundTheMainWindow(IReadOnlyList<Int32Rect> windows, Int32Rect? display)
+    {
+        // 너비나 높이가 없는 창은 화면에 아무것도 내놓지 않으면서 영역만 늘린다.
+        var usable = windows.Where(rect => rect.Width > 1 && rect.Height > 1).ToList();
+        if (usable.Count == 0)
             return null;
 
-        return new Int32Rect(left.Value, top.Value, right.Value - left.Value, bottom.Value - top.Value);
+        var main = usable.OrderByDescending(rect => (long)rect.Width * rect.Height).First();
+        var keepWithin = display ?? main;
+
+        var left = main.X;
+        var top = main.Y;
+        var right = main.X + main.Width;
+        var bottom = main.Y + main.Height;
+
+        foreach (var rect in usable)
+        {
+            if (!Overlaps(rect, keepWithin))
+                continue;
+
+            left = Math.Min(left, rect.X);
+            top = Math.Min(top, rect.Y);
+            right = Math.Max(right, rect.X + rect.Width);
+            bottom = Math.Max(bottom, rect.Y + rect.Height);
+        }
+
+        return new Int32Rect(left, top, right - left, bottom - top);
+    }
+
+    /// <summary>두 사각형이 한 점이라도 공유하는지.</summary>
+    private static bool Overlaps(Int32Rect a, Int32Rect b)
+    {
+        return a.X < b.X + b.Width && b.X < a.X + a.Width
+            && a.Y < b.Y + b.Height && b.Y < a.Y + a.Height;
+    }
+
+    /// <summary>
+    /// 가장 큰 창이 놓인 화면의 사각형. 알아낼 수 없으면 null.
+    /// 여러 화면에 걸친 배치에서 어디까지가 "이 앱의 화면" 인지 가르는 기준이 된다.
+    /// </summary>
+    private static Int32Rect? DisplayHolding(IReadOnlyList<Int32Rect> windows)
+    {
+        var usable = windows.Where(rect => rect.Width > 1 && rect.Height > 1).ToList();
+        if (usable.Count == 0)
+            return null;
+
+        var main = usable.OrderByDescending(rect => (long)rect.Width * rect.Height).First();
+        var point = new POINT { X = main.X + main.Width / 2, Y = main.Y + main.Height / 2 };
+
+        var monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+        if (monitor == IntPtr.Zero)
+            return null;
+
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(monitor, ref info))
+            return null;
+
+        return new Int32Rect(
+            info.rcMonitor.Left,
+            info.rcMonitor.Top,
+            info.rcMonitor.Right - info.rcMonitor.Left,
+            info.rcMonitor.Bottom - info.rcMonitor.Top);
     }
 
     /// <summary>

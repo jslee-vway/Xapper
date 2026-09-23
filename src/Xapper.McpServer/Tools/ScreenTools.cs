@@ -75,7 +75,10 @@ public sealed class ScreenTools
             return $"Error: {ex.Message}";
         }
 
-        var (profile, error) = await ProfileAsync(client, includeRegions: false, ct);
+        // 지문과 함께 지금 화면의 텍스트까지 한 번에 받는다. 기록은 "무엇을 만질 수 있는가" 만 담고 있어서,
+        // "지금 무엇이라고 적혀 있는가" 를 알려면 그림을 찍는 수밖에 없었다(실측: 이미 배운 화면인데도
+        // 상황을 파악하려고 창 전체를 찍은 것이 열 장 중 셋이었다). 기준점은 빼고 받으므로 히트테스트가 돌지 않는다.
+        var (profile, error) = await ProfileAsync(client, includeRegions: true, ct, addressableOnly: true);
         if (profile is null)
             return error ?? NoProfile;
 
@@ -85,6 +88,8 @@ public sealed class ScreenTools
         var record = _store.Find(profile.Signature);
         if (record is null)
             return ScreenRecallSummary.Unknown(profile.Signature, changed);
+
+        FillInCurrentText(record, profile);
 
         // 영역 목록은 기계가 시각 트리에서 뽑는 것이지 모델에게 받는 것이 아니다. 그러니 낡았을 때
         // "다시 배워 달라" 고 부탁할 이유가 없다. 지금 앱이 눈앞에 있으므로 여기서 다시 뽑아 채운다.
@@ -148,6 +153,48 @@ public sealed class ScreenTools
         return $"Learned \"{record.Name}\" for {record.App} (signature {record.Signature}): " +
                $"{record.Regions.Count} region(s) out of {profile.ElementCount} elements. " +
                "Call xapper_screen_recall on the next visit instead of taking a screenshot.";
+    }
+
+    /// <summary>
+    /// 저장해 둔 영역의 텍스트를 지금 화면의 것으로 갈아 끼웁니다.
+    /// 저장된 텍스트는 배울 때의 것이라 데이터가 바뀌면 거짓이 된다. 셀렉터가 같은 것끼리 맞춰 넣으면
+    /// 조회 한 번으로 "무엇을 만질 수 있고 지금 무엇이라고 적혀 있는지" 가 함께 나온다.
+    /// 지금 화면에 없는 영역은 텍스트를 비운다. 옛 값을 남겨 두면 없는 것을 있다고 말하는 셈이다.
+    /// </summary>
+    /// <param name="record">텍스트를 채울 기록. 메모리 안에서만 바꾸며 저장하지 않는다.</param>
+    /// <param name="profile">지금 화면의 프로필.</param>
+    private static void FillInCurrentText(ScreenRecord record, ScreenProfileResponse profile)
+    {
+        var live = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var mark in profile.Regions)
+        {
+            var selector = SelectorFor(mark);
+            if (selector is not null)
+                live[selector] = string.IsNullOrWhiteSpace(mark.Text) ? null : mark.Text;
+        }
+
+        foreach (var region in record.Regions)
+        {
+            if (region.Selector is null)
+                continue;
+
+            region.Text = live.TryGetValue(region.Selector, out var text) ? text : null;
+        }
+    }
+
+    /// <summary>
+    /// 화면에서 뽑은 영역 하나를 가리키는 셀렉터. <see cref="ToRegion"/> 과 같은 순서로 고른다.
+    /// 순서가 어긋나면 저장된 줄과 지금 줄이 다른 열쇠를 갖게 되어 짝이 맞지 않는다.
+    /// </summary>
+    private static string? SelectorFor(ScreenMark mark)
+    {
+        if (!string.IsNullOrWhiteSpace(mark.AutomationId))
+            return $"id={mark.AutomationId}";
+
+        if (!string.IsNullOrWhiteSpace(mark.Name))
+            return $"name={mark.Name}";
+
+        return string.IsNullOrWhiteSpace(mark.Text) ? null : $"text={mark.Text}";
     }
 
     /// <summary>
@@ -303,10 +350,11 @@ public sealed class ScreenTools
     /// <param name="ct">취소 토큰.</param>
     /// <returns>프로필. 실패했으면 프로필은 null 이고 호출자가 그대로 돌려줄 오류 문장이 담긴다.</returns>
     private static async Task<(ScreenProfileResponse? Profile, string? Error)> ProfileAsync(
-        InspectorClient client, bool includeRegions, CancellationToken ct)
+        InspectorClient client, bool includeRegions, CancellationToken ct, bool addressableOnly = false)
     {
         var request = IpcSerializer.CreateRequest(
-            "screenProfile", new ScreenProfileRequest { IncludeRegions = includeRegions });
+            "screenProfile",
+            new ScreenProfileRequest { IncludeRegions = includeRegions, AddressableOnly = addressableOnly });
         var response = await client.SendAsync(request, ct);
 
         if (response.Type == "error")

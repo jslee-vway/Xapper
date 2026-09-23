@@ -1290,6 +1290,9 @@ public sealed class IpcServer
             foreach (var element in Capture.ScreenRegionPicker.Pick(window, MaxScreenRegions))
                 profile.Regions.Add(DescribeRegion(element, profile.Regions.Count + 1, null));
 
+            if (request.AddressableOnly)
+                return profile;
+
             // 이름이 없어 셀렉터로 잡히지 않는 요소는 기준점과 상대 좌표로만 남길 수 있다. 그런 요소를
             // 가려내려면 "클릭이 닿는가" 를 따져야 하므로 여기서만 annotate 와 같은 고르기를 쓴다.
             var bounds = System.Windows.Media.VisualTreeHelper.GetDescendantBounds(window);

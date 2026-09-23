@@ -214,4 +214,63 @@ public class DesktopCaptureTests
             Assert.Contains("No window of this application is visible", failure.Message);
         });
     }
+
+    #region 찍을 영역 정하기
+
+    [Fact]
+    public void RegionAroundTheMainWindow_IgnoresAWindowSittingOnAnotherMonitor()
+    {
+        // 전부 합치면 앱을 찍으려던 그림에 남의 프로그램이 절반을 차지한다
+        // (실측: 가로 4000픽셀이 넘는 그림에 대상 앱이 오른쪽 3분의 1만 있었다).
+        var main = new Int32Rect(2560, 0, 1280, 1000);
+        var display = new Int32Rect(2560, 0, 1280, 1000);
+        var strayOnTheLeftMonitor = new Int32Rect(0, 0, 100, 100);
+
+        var region = DesktopCapture.RegionAroundTheMainWindow([main, strayOnTheLeftMonitor], display);
+
+        Assert.Equal(main, region);
+    }
+
+    [Fact]
+    public void RegionAroundTheMainWindow_TakesInADialogOverTheWindow()
+    {
+        // 팝업과 대화상자를 담는 것이 이 모드의 목적이다. 그것들은 주 창 위에 뜬다.
+        var main = new Int32Rect(100, 100, 800, 600);
+        var dialog = new Int32Rect(300, 500, 400, 300);
+
+        var region = DesktopCapture.RegionAroundTheMainWindow([main, dialog], display: null);
+
+        Assert.Equal(new Int32Rect(100, 100, 800, 700), region);
+    }
+
+    [Fact]
+    public void RegionAroundTheMainWindow_TakesInADropdownBelowTheWindow()
+    {
+        // 창 아래로 펼쳐지는 드롭다운은 창과 겹치지 않으면서도 같은 화면에 있다. 같은 화면이면 담는다.
+        var main = new Int32Rect(100, 100, 800, 400);
+        var display = new Int32Rect(0, 0, 1920, 1080);
+        var dropdown = new Int32Rect(200, 520, 200, 150);
+
+        var region = DesktopCapture.RegionAroundTheMainWindow([main, dropdown], display);
+
+        Assert.Equal(new Int32Rect(100, 100, 800, 570), region);
+    }
+
+    [Fact]
+    public void RegionAroundTheMainWindow_SkipsWindowsWithNoArea()
+    {
+        // 너비나 높이가 없는 창은 화면에 아무것도 내놓지 않으면서 영역만 늘린다.
+        var main = new Int32Rect(100, 100, 800, 600);
+        var degenerate = new Int32Rect(0, 0, 0, 0);
+
+        Assert.Equal(main, DesktopCapture.RegionAroundTheMainWindow([main, degenerate], display: null));
+    }
+
+    [Fact]
+    public void RegionAroundTheMainWindow_IsNull_WhenNothingIsUsable()
+    {
+        Assert.Null(DesktopCapture.RegionAroundTheMainWindow([new Int32Rect(0, 0, 1, 1)], display: null));
+    }
+
+    #endregion
 }

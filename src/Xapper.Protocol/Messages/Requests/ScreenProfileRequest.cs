@@ -10,4 +10,11 @@ public sealed class ScreenProfileRequest
     /// 조회는 지문만 있으면 되고, 기록할 때만 영역이 필요하다.
     /// </summary>
     public bool IncludeRegions { get; set; }
+
+    /// <summary>
+    /// true 면 셀렉터로 지목되는 영역만 돌려준다. 기준점이 붙는 영역은 "클릭이 닿는가" 를 따져야 해서
+    /// 요소마다 히트테스트가 돌지만, 셀렉터로 잡히는 영역은 트리를 한 번 훑는 것으로 끝난다.
+    /// 조회는 이미 아는 영역의 지금 텍스트만 있으면 되므로 이쪽을 쓴다.
+    /// </summary>
+    public bool AddressableOnly { get; set; }
 }
