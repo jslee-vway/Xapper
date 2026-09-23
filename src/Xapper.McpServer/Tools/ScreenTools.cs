@@ -98,7 +98,7 @@ public sealed class ScreenTools
         "same screen again overwrites the previous record. Do this right after you have looked at an unknown " +
         "screen with xapper_screenshot(annotate: true) and understood it.")]
     public async Task<string> Learn(
-        [Description("One line saying what this screen is, e.g. '로그인 화면' or 'DFMEA Step 3 기능분석'")] string name,
+        [Description("One line saying what this screen is, e.g. '로그인 화면' or '주문 목록 - 검색 조건 펼친 상태'")] string name,
         [Description("Anything worth remembering that the structure cannot show: a gotcha, a shortcut, where a button leads. Optional")] string? notes = null,
         CancellationToken ct = default)
     {

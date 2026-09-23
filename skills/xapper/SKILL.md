@@ -87,7 +87,7 @@ buys nothing: check the result once at the end rather than between steps.
 [{"tool": "click",  "target": "name=FilterBox"},
  {"tool": "type",   "target": "name=FilterBox", "text": "draft"},
  {"tool": "key",    "key": "Enter"},
- {"tool": "assert", "target": "name=ResultCount", "propertyName": "Text", "expected": "3"}]
+ {"tool": "assert", "target": "name=ResultCount", "property": "Text", "expected": "3"}]
 ```
 
 Two tools send a sequence:
