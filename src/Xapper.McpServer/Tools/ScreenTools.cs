@@ -52,10 +52,15 @@ public sealed class ScreenTools
     /// <summary>현재 화면의 지문으로 저장된 기록을 찾습니다.</summary>
     [McpServerTool(Name = "xapper_screen_recall"), Description(
         "Look up what is known about the screen the app is showing right now, keyed by a fingerprint taken from " +
-        "the structure of its main window. Call it first on arriving at a screen. A known screen comes back with " +
-        "the selectors and anchors to act on, so you need no screenshot at all. An unknown screen comes back with " +
-        "what to do instead, and says whether the screen changed since your last recall. Cheap - it reads no " +
-        "pixels and hit-tests nothing.")]
+        "the structure of its main window. Call it every time the screen changes, not once at the start. " +
+        "A known screen comes back with the selectors and anchors to act on, so you need no screenshot at all. " +
+        "Read the answer like this: a line that starts with a selector goes straight into target; a line reading " +
+        "\"in X at a,b\" has no selector, so act on it with target=X and x=a, y=b, which are fractions of X " +
+        "rather than pixels. The notes are standing facts earlier visits worked out - act on them instead of " +
+        "finding out again, and when one proves wrong rewrite it with xapper_screen_note. The learned date and " +
+        "seen count tell you how much may have changed since, not whether it is right. " +
+        "An unknown screen comes back with what to do instead, and says whether the screen changed since your " +
+        "last recall. Cheap - it reads no pixels and hit-tests nothing.")]
     public async Task<string> Recall(CancellationToken ct = default)
     {
         InspectorClient client;

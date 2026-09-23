@@ -88,8 +88,11 @@ var serverInstructions = """
     summary. Explore first with find/snapshot, then drive with a script. Prefer id/name selectors and waitUntil
     over sleep, so the same script can be re-run.
 
-    On arriving at a screen, call xapper_screen_recall first. A known screen comes back with the selectors and
-    anchors you need, so you can act without a screenshot. An unknown or changed screen is the signal to look
+    On arriving at a screen, call xapper_screen_recall first, and again every time the screen changes. A known
+    screen comes back with the selectors and anchors you need, so you can act without a screenshot. Read the
+    answer: a line starting with a selector goes into target as it stands, while a line reading "in X at a,b"
+    has none of its own and is acted on with target=X and x=a, y=b, which are fractions of X rather than
+    pixels. The notes are standing facts earlier visits worked out - act on them instead of finding out again. An unknown or changed screen is the signal to look
     once with xapper_screenshot(annotate: true) and then xapper_screen_learn it, so the next visit is free.
     Whenever you then learn something the structure cannot show, put it on the record with xapper_screen_note.
     Write a standing fact about the screen, not a report of what you did: "Ctrl+Z undoes the last edit here"

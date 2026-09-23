@@ -30,6 +30,24 @@ each is a new screen with its own record.
 A known screen comes back with the selectors to act on, and you can work without looking at all.
 An unknown screen is the signal to look once, and only once.
 
+Read what comes back rather than skimming it. Every line is something you would otherwise have to
+work out:
+
+- **A line that starts with a selector** - `name=treeViewFunctions  TreeViewControl` - goes
+  straight into `target`.
+- **A line reading `in X at a,b`** has no selector of its own. Act on it with `target=X` and
+  `x=a`, `y=b`. Those are fractions of X, not pixels, so they keep working when the window is
+  resized or the display scales.
+- **The notes are standing facts**, worked out by earlier visits so that this one does not have to.
+  Act on them instead of confirming them: a note saying a dialog can appear is the reason you do
+  not need a picture to find out. If one turns out to be wrong, rewrite it with `replace` - a note
+  left wrong costs every later visit.
+- **The learned date and seen count** say how much may have changed since, not whether the record
+  is right. An old record is not a suspect one; a record that contradicts what the app does is.
+
+When a selector from the record no longer resolves, the screen itself has changed. Find the control
+again, then learn the screen anew so the record stops lying.
+
 A known screen is also the moment to stop moving one step at a time. You already hold every
 selector the screen offers, so plan the whole sequence up front - click this, type that, press
 Enter - and send it in a single call instead of looking between each step. Build those steps from

@@ -35,6 +35,13 @@ internal static class ScreenRecallSummary
             sb.AppendLine("Act on these without a screenshot:");
             foreach (var region in record.Regions)
                 sb.AppendLine("  " + Describe(region));
+
+            // 셀렉터 줄은 그대로 target 에 넣으면 되지만, 기준점 줄은 쓰는 법이 눈에 보이지 않는다.
+            // 좌표가 요소 안의 비율이라는 사실을 모르면 픽셀로 착각해 엉뚱한 자리를 누른다.
+            if (record.Regions.Any(region => string.IsNullOrWhiteSpace(region.Selector)))
+                sb.AppendLine(
+                    "A line reading \"in X at a,b\" has no selector of its own: act on it with target=X and " +
+                    "x=a, y=b, which are fractions of X, not pixels.");
         }
         else
         {
@@ -44,7 +51,13 @@ internal static class ScreenRecallSummary
         }
 
         if (!string.IsNullOrWhiteSpace(record.Notes))
+        {
+            // 비고는 지난 방문이 알아낸 것을 그대로 믿고 쓰라고 적어 둔 것이다. 다시 확인하면 아낀 것이 없다.
             sb.AppendLine($"Notes: {record.Notes}");
+            sb.AppendLine(
+                "Those notes are what earlier visits worked out; act on them rather than finding out again. " +
+                "If one turns out to be wrong, call xapper_screen_note with replace and write the corrected set.");
+        }
 
         return sb.ToString().TrimEnd();
     }

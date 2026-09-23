@@ -20,6 +20,36 @@ public class ScreenRecallSummaryTests
     };
 
     [Fact]
+    public void Known_ExplainsHowToActOnAnAnchoredLine()
+    {
+        // 기준점 줄의 좌표는 요소 안의 비율인데, 그것을 모르면 픽셀로 착각해 엉뚱한 자리를 누른다.
+        // 쓰는 법이 줄 자체에 드러나지 않으므로 응답이 직접 일러 준다.
+        var text = ScreenRecallSummary.Known(Record());
+
+        Assert.Contains("fractions of X", text);
+        Assert.Contains("target=X", text);
+    }
+
+    [Fact]
+    public void Known_DoesNotExplainAnchors_WhenEveryRegionHasASelector()
+    {
+        // 기준점 줄이 없으면 그 설명은 자리만 차지한다.
+        var record = Record();
+        record.Regions = [new ScreenRegion { Type = "TextBox", Selector = "id=UsernameInput" }];
+
+        Assert.DoesNotContain("fractions of X", ScreenRecallSummary.Known(record));
+    }
+
+    [Fact]
+    public void Known_TellsTheReaderToActOnTheNotesRatherThanRecheckThem()
+    {
+        var text = ScreenRecallSummary.Known(Record());
+
+        Assert.Contains("act on them rather than finding out again", text);
+        Assert.Contains("replace", text);
+    }
+
+    [Fact]
     public void Known_RefusesToPromiseAnythingFromARecordWithNoSelector()
     {
         // 좌표 몇 줄만 들고 "스크린샷 없이 조작하라" 고 말하면 잘못된 확신을 준다.
