@@ -178,6 +178,24 @@ public class ScreenRegionPickerTests
     }
 
     [Fact]
+    public void Pick_SkipsAPartEvenWhenItHasNoTemplateParent()
+    {
+        StaThread.Run(() =>
+        {
+            // 컨테이너 생성기가 만든 부품은 템플릿 부모가 비어 있어 첫 기준을 그대로 빠져나온다
+            // (실측: 기록 14개 중 PART_CaptionBackground 등 세 개가 자리를 차지했다).
+            // WPF 는 템플릿 부품 이름을 PART_ 로 시작하도록 규약을 두므로 이름으로 한 번 더 거른다.
+            var part = new Border { Width = 140, Height = 36, Background = Brushes.Silver, Name = "PART_Button" };
+            Canvas.SetLeft(part, 10);
+            Canvas.SetTop(part, 10);
+
+            var canvas = BuildCanvas(400, 300, part, Named("AppControl", 10, 60));
+
+            Assert.Equal(["AppControl"], IdsOf(ScreenRegionPicker.Pick(canvas, maxRegions: 50)));
+        });
+    }
+
+    [Fact]
     public void Pick_SkipsAnIdThatIsNotUnique()
     {
         StaThread.Run(() =>

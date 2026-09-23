@@ -19,6 +19,13 @@ namespace Xapper.Inspector.Capture;
 /// </summary>
 public static class ScreenRegionPicker
 {
+    #region Constants
+
+    /// <summary>컨트롤 템플릿이 만든 부품의 이름 앞에 붙는 WPF 규약 접두사.</summary>
+    private const string TemplatePartPrefix = "PART_";
+
+    #endregion
+
     #region Public Methods
 
     /// <summary>
@@ -89,16 +96,28 @@ public static class ScreenRegionPicker
     /// 앱 작성자가 놓지 않은 부품은 기록에 담아도 다음 방문에 쓸 일이 없고, 자리만 차지해 정작 필요한
     /// 컨트롤을 밀어낸다.
     ///
-    /// 가르는 기준은 "누가 이 요소를 만들었는가" 다. 컨트롤 템플릿이 만든 부품은 그 컨트롤 자신을
-    /// 템플릿 부모로 가리키는 반면, DataTemplate 이 만든 내용물은 그것을 얹은 ContentPresenter 를
+    /// 가르는 기준이 둘이다. 첫째는 "누가 이 요소를 만들었는가" 다. 컨트롤 템플릿이 만든 부품은 그 컨트롤
+    /// 자신을 템플릿 부모로 가리키는 반면, DataTemplate 이 만든 내용물은 그것을 얹은 ContentPresenter 를
     /// 가리킨다(실측으로 확인). 그래서 템플릿 부모가 컨트롤일 때만 내부 구조로 본다.
     /// 템플릿 부모가 있다는 사실만으로 걸러내면 DataTemplate 안에 놓인 앱 화면까지 통째로 사라진다.
+    ///
+    /// 둘째는 이름이다. 첫 기준으로는 다 걸러지지 않는 부품이 실제로 새어 들어왔기 때문에 덧붙였다.
     /// </summary>
     private static bool IsChrome(UIElement element)
     {
         try
         {
-            return element is FrameworkElement { TemplatedParent: System.Windows.Controls.Control };
+            if (element is not FrameworkElement frameworkElement)
+                return false;
+
+            if (frameworkElement.TemplatedParent is System.Windows.Controls.Control)
+                return true;
+
+            // 템플릿 부모만으로는 다 걸러지지 않는다. 컨테이너 생성기가 만든 부품은 템플릿 부모가 비어 있어서
+            // 그대로 새어 들어온다(실측: 기록 14개 중 PART_CaptionBackground·PART_Button·PART_GlyphPresenter
+            // 세 개가 자리를 차지했다). WPF 는 템플릿 부품의 이름을 PART_ 로 시작하도록 규약을 두고 있고
+            // TemplatePartAttribute 가 그 이름을 그대로 쓰므로, 이 접두사는 짐작이 아니라 틀이 정한 표식이다.
+            return frameworkElement.Name.StartsWith(TemplatePartPrefix, StringComparison.Ordinal);
         }
         catch (Exception)
         {

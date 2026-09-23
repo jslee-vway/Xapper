@@ -78,8 +78,19 @@ resolve to a *different* element and act on it without complaint. Use refs from 
 snapshot, and prefer target selectors when a sequence spans one. `xapper_find` leaves existing refs
 alone and only hands out new numbers.
 
-Send a sequence as one call rather than one tool call per step, and check the result once at the
-end rather than between steps. Two tools do this:
+**The moment you can name the next two steps, send them together.** Not three, not "a long
+sequence" - two. Typing into a box and pressing Enter is two. Selecting a row and pressing Delete
+is two. One call per keystroke is the single most common way a session doubles in length, and it
+buys nothing: check the result once at the end rather than between steps.
+
+```json
+[{"tool": "click",  "target": "name=SearchText"},
+ {"tool": "type",   "target": "name=SearchText", "text": "고장"},
+ {"tool": "key",    "key": "Enter"},
+ {"tool": "assert", "target": "name=ResultCount", "propertyName": "Text", "expected": "3"}]
+```
+
+Two tools send a sequence:
 
 - **`xapper_batch`** for a straight line of steps. They run in order, the batch stops at the first
   failure, and you get one numbered result per step in the format the single tools return. Steps
@@ -152,3 +163,5 @@ These are the habits that actually cost sessions, each seen in a real transcript
   panel in question.
 - A disabled button clicked three times, each costing the full timeout, each followed by a property
   read asking why.
+- Nine arrow keys and an Enter sent as ten separate calls, then again as seven, when each run was a
+  straight line known in advance and would have been one `xapper_batch`.

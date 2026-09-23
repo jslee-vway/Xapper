@@ -173,11 +173,11 @@ public sealed class ScreenTools
         "tree. The regions are left untouched and earlier notes are kept, so later visits get everything. " +
         "The screen must have been learned first.")]
     public async Task<string> Note(
-        [Description("One line worth remembering, e.g. 'Undo 버튼은 변경 이력이 하나 이상 있어야 활성화된다'")] string text,
+        [Description("One line worth remembering, e.g. 'Undo 버튼은 변경 이력이 하나 이상 있어야 활성화된다'")] string notes,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(text))
-            return "Error: text is required. Give one line worth remembering about this screen.";
+        if (string.IsNullOrWhiteSpace(notes))
+            return "Error: notes is required. Give one line worth remembering about this screen.";
 
         InspectorClient client;
         try
@@ -193,7 +193,7 @@ public sealed class ScreenTools
         if (profile is null)
             return error ?? NoProfile;
 
-        if (!_store.AppendNote(profile.Signature, text.Trim()))
+        if (!_store.AppendNote(profile.Signature, notes.Trim()))
             return $"No screen record exists for the screen you are on (signature {profile.Signature}), so there " +
                    "is nothing to add the note to. Call xapper_screen_learn first - you can pass the same line " +
                    "as its notes.";
