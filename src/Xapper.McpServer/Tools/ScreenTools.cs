@@ -58,7 +58,9 @@ public sealed class ScreenTools
         "\"in X at a,b\" has no selector, so act on it with target=X and x=a, y=b, which are fractions of X " +
         "rather than pixels. The notes are standing facts earlier visits worked out - act on them instead of " +
         "finding out again, and when one proves wrong rewrite it with xapper_screen_note. The learned date and " +
-        "seen count tell you how much may have changed since, not whether it is right. " +
+        "seen count tell you how much may have changed since, not whether it is right. Regions are derived from " +
+        "the live tree, so a record whose regions have gone stale is refreshed here without being asked - you " +
+        "never have to re-learn a screen to fix its selectors, only to change its name. " +
         "An unknown screen comes back with what to do instead, and says whether the screen changed since your " +
         "last recall. Cheap - it reads no pixels and hit-tests nothing.")]
     public async Task<string> Recall(CancellationToken ct = default)
@@ -84,15 +86,15 @@ public sealed class ScreenTools
         if (record is null)
             return ScreenRecallSummary.Unknown(profile.Signature, changed);
 
-        // 셀렉터가 하나도 없는 영역 묶음은 다시 방문해도 쓸 데가 없으면서 응답만 채운다. 이 자리에서 덜어내면
-        // 다음 조회는 깨끗해지고, 다시 배우라는 안내가 묻히지 않는다. 비고는 값이 있으므로 그대로 둔다.
-        if (record.Regions.Count > 0 && !record.Regions.Any(region => !string.IsNullOrWhiteSpace(region.Selector)))
-        {
-            _store.DropRegions(record.Signature);
-            record.Regions.Clear();
-        }
+        // 영역 목록은 기계가 시각 트리에서 뽑는 것이지 모델에게 받는 것이 아니다. 그러니 낡았을 때
+        // "다시 배워 달라" 고 부탁할 이유가 없다. 지금 앱이 눈앞에 있으므로 여기서 다시 뽑아 채운다.
+        // 이름과 비고는 모델만 지을 수 있는 것이므로 그대로 둔다(실측: 다시 배우라는 안내를 두 세션 연속
+        // 무시했고, 낡은 규칙으로 만들어진 기록은 아무도 되살리지 않아 그대로 남아 있었다).
+        var refreshed = false;
+        if (NeedsFreshRegions(record))
+            refreshed = await RefreshRegionsAsync(client, record, ct);
 
-        return ScreenRecallSummary.Known(record);
+        return ScreenRecallSummary.Known(record, refreshed);
     }
 
     /// <summary>현재 화면을 이름과 메모와 함께 기록합니다.</summary>
@@ -149,6 +151,48 @@ public sealed class ScreenTools
     }
 
     /// <summary>
+    /// 저장된 영역을 다시 뽑아야 하는지 판단합니다.
+    /// 두 가지를 본다. 셀렉터가 하나도 없으면 다시 방문해도 쓸 데가 없고, 컨트롤 템플릿 부품이 섞여 있으면
+    /// 그것을 걸러내기 전의 규칙으로 만들어진 기록이다. 어느 쪽이든 지금 다시 뽑는 편이 정확하다.
+    /// </summary>
+    /// <param name="record">살펴볼 기록.</param>
+    private static bool NeedsFreshRegions(ScreenRecord record)
+    {
+        if (record.Regions.Count == 0)
+            return true;
+
+        if (!record.Regions.Any(region => !string.IsNullOrWhiteSpace(region.Selector)))
+            return true;
+
+        return record.Regions.Any(region =>
+            region.Selector is { } selector && selector.Contains("=PART_", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// 지금 화면에서 영역을 다시 뽑아 기록에 채웁니다. 이름과 비고는 건드리지 않습니다.
+    /// 뽑는 데 실패하면 기록을 그대로 두고 false 를 돌려준다. 있던 것을 지우는 것보다는 낡은 채로 두는 편이 낫다.
+    /// </summary>
+    /// <param name="client">활성 세션의 Inspector 연결.</param>
+    /// <param name="record">채워 넣을 기록. 성공하면 영역이 새 것으로 바뀐다.</param>
+    /// <param name="ct">취소 토큰.</param>
+    /// <returns>다시 뽑아 저장했으면 true.</returns>
+    private async Task<bool> RefreshRegionsAsync(InspectorClient client, ScreenRecord record, CancellationToken ct)
+    {
+        var (profile, _) = await ProfileAsync(client, includeRegions: true, ct);
+        if (profile is null)
+            return false;
+
+        var regions = profile.Regions.Where(IsWorthStoring).Select(ToRegion).ToList();
+        if (regions.Count == 0)
+            return false;
+
+        record.Regions.Clear();
+        record.Regions.AddRange(regions);
+        _store.Save(record);
+        return true;
+    }
+
+    /// <summary>
     /// 이 영역을 기록해 둘 값어치가 있는지 판단합니다.
     /// id·name 으로 잡히는 요소와, 셀렉터가 없어 기준점이 붙은 요소만 남긴다.
     ///
@@ -178,7 +222,9 @@ public sealed class ScreenTools
         "backup-recovery dialog that the visual tree does not show', 'the X icon in the tree deletes and asks to " +
         "confirm'. A line that begins with a date or with what you verified is worth nothing later; a line the " +
         "next agent can act on without checking is worth the call. " +
-        "The note lands on the screen showing right now, so write it before you navigate away. Lines are " +
+        "The note lands on the screen showing right now, so write it the moment you find the thing out, before " +
+        "you navigate away and before you move on to the next step. Held back until the end of the session, it " +
+        "is lost if the session ends first. Lines are " +
         "appended and the regions are untouched; pass replace to rewrite the notes when one has gone stale. " +
         "The screen must have been learned first.")]
     public async Task<string> Note(

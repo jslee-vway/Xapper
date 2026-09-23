@@ -31,22 +31,6 @@ public class ScreenStoreTests : IDisposable
     };
 
     [Fact]
-    public void DropRegions_ClearsTheRegionsButKeepsTheNameAndNotes()
-    {
-        // 셀렉터가 하나도 없는 영역 묶음은 덜어내되, 함께 적어 둔 비고는 값이 있으므로 남긴다.
-        using var store = NewStore();
-        store.Save(Record("aaa"));
-
-        Assert.Equal(2, store.DropRegions("aaa"));
-
-        var found = store.Find("aaa");
-        Assert.NotNull(found);
-        Assert.Empty(found.Regions);
-        Assert.Equal("화면", found.Name);
-        Assert.Equal("메모", found.Notes);
-    }
-
-    [Fact]
     public void AppendNote_AddsToWhatWasAlreadyThere()
     {
         using var store = NewStore();

@@ -20,6 +20,21 @@ public class ScreenRecallSummaryTests
     };
 
     [Fact]
+    public void Known_SaysSo_WhenTheRegionsWereJustRetaken()
+    {
+        // 영역이 방금 바뀌었다는 사실을 알리지 않으면, 이 기록을 예전에 본 쪽이 옛 목록을 들고 움직인다.
+        var text = ScreenRecallSummary.Known(Record(), regionsRefreshed: true);
+
+        Assert.Contains("taken again from the live screen", text);
+    }
+
+    [Fact]
+    public void Known_StaysQuiet_WhenTheRegionsWereNotTouched()
+    {
+        Assert.DoesNotContain("taken again from the live screen", ScreenRecallSummary.Known(Record()));
+    }
+
+    [Fact]
     public void Known_ExplainsHowToActOnAnAnchoredLine()
     {
         // 기준점 줄의 좌표는 요소 안의 비율인데, 그것을 모르면 픽셀로 착각해 엉뚱한 자리를 누른다.

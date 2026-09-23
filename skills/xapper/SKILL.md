@@ -164,9 +164,10 @@ next agent act on this line without checking it first?
 A dated verification log ages into noise. A fact about the screen stays true until the screen
 changes - and when it does, call the tool again with `replace` and write the corrected set.
 
-**Write the note before you navigate away.** It lands on the screen showing at that moment. If a
-button opens a dialog, the fact that it does belongs to the screen with the button, so note it
-there rather than after the dialog has taken over.
+**Write the note the moment you find the thing out.** It lands on the screen showing at that
+moment, so a fact noted later can land on the wrong record: if a button opens a dialog, the fact
+that it does belongs to the screen with the button, not to the dialog. Collecting findings and
+writing them all at the end also loses every one of them if the session ends first.
 
 One fact per line. Lines are appended unless you pass `replace`, and the regions are left untouched
 either way.

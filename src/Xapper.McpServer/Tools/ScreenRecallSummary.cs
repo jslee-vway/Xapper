@@ -18,14 +18,19 @@ internal static class ScreenRecallSummary
     /// 언제 배웠고 몇 번 쓰였는지를 함께 적어, 기록이 오래되어 미심쩍을 때 모델이 다시 살펴볼지 판단할 수 있게 한다.
     /// </summary>
     /// <param name="record">조회에 걸린 화면 기록.</param>
+    /// <param name="regionsRefreshed">영역을 방금 다시 뽑아 채웠으면 true.</param>
     /// <returns>여러 줄의 응답 문장.</returns>
-    public static string Known(ScreenRecord record)
+    public static string Known(ScreenRecord record, bool regionsRefreshed = false)
     {
         if (record is null)
             throw new ArgumentNullException(nameof(record));
 
         var sb = new StringBuilder();
         sb.AppendLine($"Known screen: {record.Name}  ({Provenance(record)})");
+
+        // 영역이 방금 바뀌었다는 사실을 알려야, 예전에 이 기록을 본 적 있는 쪽이 옛 목록을 들고 움직이지 않는다.
+        if (regionsRefreshed)
+            sb.AppendLine("Its regions were out of date and have just been taken again from the live screen.");
 
         // 셀렉터가 하나도 없는 기록은 "스크린샷 없이 조작하라" 고 말할 자격이 없다. 좌표 몇 줄로는 그렇게
         // 할 수 없는데도 그 문장이 잘못된 확신을 준다(실측: 기준점 여섯 줄짜리 기록을 받은 직후 스크린샷을
