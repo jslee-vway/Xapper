@@ -98,7 +98,7 @@ public sealed class CaptureTools
         if (markList.Length > 0)
             summary += "\n" + markList;
 
-        summary += RecordHint(known, learned);
+        summary += RecordHint(known);
 
         if (result.Warning is not null)
             summary += $"\nWARNING: {result.Warning}";
@@ -134,21 +134,21 @@ public sealed class CaptureTools
     /// 이 화면이 기록에 있는지를 한 줄로 덧붙입니다.
     /// 그림을 받아 드는 순간이 배우기에 가장 좋은 시점인데, 지침에만 적어 두면 그 순간에 떠오르지 않는다
     /// (실측: 46장을 찍는 동안 학습이 한 번도 일어나지 않았다). 그래서 사실을 그림에 딸려 보낸다.
+    ///
+    /// 기록이 있기만 하면 영역의 상태는 따지지 않는다. 영역이 낡았다면 다음 조회가 알아서 다시 뽑기 때문이다.
+    /// 여기서 "다시 배우라" 고 권하면 서버가 이미 맡은 일을 모델에게 또 시키는 꼴이 되고, 두 통로가 같은
+    /// 상태를 두고 다른 말을 하게 된다. 배우는 일이 남는 것은 기록이 아예 없을 때뿐이다.
     /// </summary>
     /// <param name="record">지금 화면의 기록. 없으면 null.</param>
-    /// <param name="learned">기록에 셀렉터로 지목되는 영역이 하나라도 있으면 true.</param>
-    private static string RecordHint(ScreenRecord? record, bool learned)
+    private static string RecordHint(ScreenRecord? record)
     {
-        if (learned && record is not null)
-            return $"\nThis screen is already learned as \"{record.Name}\". Call xapper_screen_recall for its " +
-                   "selectors instead of looking again, and xapper_screen_note to record what you have just found out.";
+        if (record is null)
+            return "\nThis screen is not in the record yet. Once you understand it, call xapper_screen_learn so " +
+                   "the next visit needs no picture.";
 
-        if (record is not null)
-            return "\nThis screen has a record, but nothing in it a selector can reach. Once you understand the " +
-                   "screen, call xapper_screen_learn to replace it.";
-
-        return "\nThis screen is not in the record yet. Once you understand it, call xapper_screen_learn so the " +
-               "next visit needs no picture.";
+        return $"\nThis screen is already learned as \"{record.Name}\". Call xapper_screen_recall for its " +
+               "selectors instead of looking again - stale ones are retaken there without being asked - and " +
+               "xapper_screen_note to record what you have just found out.";
     }
 
     /// <summary>

@@ -118,6 +118,39 @@ public class CaptureToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Screenshot_DoesNotAskToRelearn_WhenTheScreenAlreadyHasARecord()
+    {
+        // 영역이 낡았으면 다음 조회가 알아서 다시 뽑는다. 여기서 다시 배우라고 권하면 서버가 이미 맡은 일을
+        // 모델에게 또 시키는 꼴이고, 두 통로가 같은 상태를 두고 다른 말을 하게 된다.
+        const string signature = "sig-thin";
+        using (var store = NewStore())
+        {
+            store.Save(new ScreenRecord
+            {
+                Signature = signature,
+                App = "DemoApp",
+                Name = "설정 화면",
+                Regions = [new ScreenRegion { Type = "Grid", Anchor = "name=Root", AnchorX = 0.5, AnchorY = 0.5 }]
+            });
+        }
+
+        var processId = FakeInspector.NextProcessId();
+        await using var fakeInspector = FakeInspector.Create(processId);
+        await using var sessions = new SessionManager();
+        var accepting = fakeInspector.WaitForConnectionAsync();
+        await sessions.AttachAsync(processId);
+        await accepting;
+
+        var responding = RespondWithScreenshot(fakeInspector, signature);
+        var blocks = (await new CaptureTools(sessions, NewStore()).Screenshot()).ToList();
+        await responding;
+
+        var summary = Assert.IsType<TextContentBlock>(blocks[0]);
+        Assert.Contains("already learned", summary.Text);
+        Assert.DoesNotContain("xapper_screen_learn", summary.Text);
+    }
+
+    [Fact]
     public async Task Screenshot_ReturnsTheWholeImage_NotATruncatedString()
     {
         var processId = FakeInspector.NextProcessId();
