@@ -33,8 +33,18 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
     /// </summary>
     private static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(1);
 
+    /// <summary>
+    /// 서버가 올린 알림이 조용한 채로 버티는 시간. 실제 마우스 입력이 이어지는 동안에는 호출마다 다시 늘어나고,
+    /// 멎으면 이만큼 뒤에 내려간다. 사람이 손을 떼고 있어야 하는 구간보다 넉넉하되, 잊힌 배너가 화면에 오래
+    /// 남지는 않을 만큼으로 잡았다.
+    /// </summary>
+    private static readonly TimeSpan AutoRaisedLifetime = TimeSpan.FromSeconds(20);
+
     private readonly object _gate = new();
     private Thread? _thread;
+
+    /// <summary>서버가 올린 알림을 내릴 시한. 에이전트가 직접 올린 알림에는 걸지 않는다.</summary>
+    private Timer? _autoHide;
 
     /// <summary>알림 스레드가 창을 만들고 넘겨준 디스패처. 첫 호출이 만들고 그 뒤 호출은 같은 작업을 기다린다 —
     /// 동시에 두 번 부르면 스레드와 창이 둘 생기고 하나는 영영 안 내려가므로, 완료 여부가 아니라 작업 자체를 공유한다.</summary>
@@ -59,8 +69,22 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
     #region Public Methods
 
     /// <inheritdoc />
+    public void KeepAliveForAutoRaised()
+    {
+        lock (_gate)
+        {
+            _autoHide ??= new Timer(_ => _ = HideAsync(CancellationToken.None), null,
+                Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            _autoHide.Change(AutoRaisedLifetime, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<(bool Shown, string? Error)> ShowAsync(string? message, int? targetProcessId, CancellationToken ct)
     {
+        // 에이전트가 직접 올린 알림은 스스로 내릴 때까지 그대로 두어야 한다. 서버가 건 시한이 남아 있으면 푼다.
+        CancelAutoHide();
+
         Dispatcher dispatcher;
         try
         {
@@ -99,6 +123,7 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
     /// <inheritdoc />
     public async Task HideAsync(CancellationToken ct)
     {
+        CancelAutoHide();
         _visible = false;
         var dispatcher = DispatcherIfRunning();
         if (dispatcher is null)
@@ -112,6 +137,13 @@ public sealed class OperatorNotice : IOperatorNotice, IAsyncDisposable
         {
             // 알림 스레드가 응답하지 않는다. 내릴 창이 있다면 어차피 못 내리고, 도구 호출을 여기서 붙들지 않는다.
         }
+    }
+
+    /// <summary>걸려 있던 시한을 풉니다.</summary>
+    private void CancelAutoHide()
+    {
+        lock (_gate)
+            _autoHide?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
 
     /// <summary>

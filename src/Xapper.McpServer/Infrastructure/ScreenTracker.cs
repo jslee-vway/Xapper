@@ -16,4 +16,39 @@ public sealed class ScreenTracker
     public string? LastSignature { get; set; }
 
     #endregion
+
+    #region Fields
+
+    /// <summary>화면마다, 마지막으로 무언가를 기록한 뒤로 찍은 그림의 수.</summary>
+    private readonly Dictionary<string, int> _picturesSinceRecording = new(StringComparer.Ordinal);
+
+    #endregion
+
+    #region Public Methods
+
+    /// <summary>
+    /// 이 화면을 한 장 더 찍었다고 세고, 마지막으로 기록한 뒤 몇 장째인지 돌려줍니다.
+    /// 같은 화면을 거듭 찍으면서 아무것도 남기지 않는 것이 가장 흔한 낭비라, 그 횟수를 세어 두었다가
+    /// 응답의 말투를 바꾸는 데 쓴다.
+    /// </summary>
+    /// <param name="signature">찍은 화면의 지문.</param>
+    public int CountPicture(string signature)
+    {
+        lock (_picturesSinceRecording)
+        {
+            var count = _picturesSinceRecording.TryGetValue(signature, out var taken) ? taken + 1 : 1;
+            _picturesSinceRecording[signature] = count;
+            return count;
+        }
+    }
+
+    /// <summary>이 화면에 무언가를 기록했으므로 세어 둔 장수를 지웁니다.</summary>
+    /// <param name="signature">기록한 화면의 지문.</param>
+    public void Recorded(string signature)
+    {
+        lock (_picturesSinceRecording)
+            _picturesSinceRecording.Remove(signature);
+    }
+
+    #endregion
 }

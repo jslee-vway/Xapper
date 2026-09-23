@@ -76,9 +76,13 @@ click into it with `x`/`y` and send `xapper_key` instead.
 process: real window messages with the OS cursor reads briefly spoofed, so WPF accepts them as
 genuine while the physical pointer never moves. The person can keep working. Only when that path
 cannot be set up does Xapper fall back to real mouse input, which does move the pointer and take
-focus - and the response says which one ran. When you expect the real one, call
-`xapper_notice_show` first so a banner warns the person off, and `xapper_notice_hide` when that
-stretch is done.
+focus - and the response says which one ran.
+
+When you expect the real one, call `xapper_notice_show` first so a banner warns the person off. If
+you raise that banner, you own it: call `xapper_notice_hide` the moment that stretch of work ends,
+and again before you finish the task. A banner you raised and walked away from sits over the
+person's screen until they close it by hand. The one the server raises for you when an action
+drives the real mouse takes itself down once the input stops, but yours does not.
 
 When an action refuses, the message names the single condition that blocked it:
 

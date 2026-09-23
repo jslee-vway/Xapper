@@ -149,6 +149,7 @@ public sealed class ScreenTools
 
         _store.Save(record);
         _tracker.LastSignature = profile.Signature;
+        _tracker.Recorded(profile.Signature);
 
         return $"Learned \"{record.Name}\" for {record.App} (signature {record.Signature}): " +
                $"{record.Regions.Count} region(s) out of {profile.ElementCount} elements. " +
@@ -306,6 +307,7 @@ public sealed class ScreenTools
                    "as its notes.";
 
         _tracker.LastSignature = profile.Signature;
+        _tracker.Recorded(profile.Signature);
         return $"{(replace ? "Rewrote the notes" : "Noted")} on the record for signature {profile.Signature}. " +
                "xapper_screen_recall will show it on the next visit.";
     }

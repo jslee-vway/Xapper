@@ -88,7 +88,7 @@ public class CaptureToolsTests : IDisposable
         await accepting;
 
         var responding = RespondWithScreenshot(fakeInspector, signature);
-        var blocks = (await new CaptureTools(sessions, NewStore()).Screenshot(annotate: true)).ToList();
+        var blocks = (await new CaptureTools(sessions, NewStore(), new ScreenTracker()).Screenshot(annotate: true)).ToList();
         await responding;
 
         var only = Assert.IsType<TextContentBlock>(Assert.Single(blocks));
@@ -109,7 +109,7 @@ public class CaptureToolsTests : IDisposable
         await accepting;
 
         var responding = RespondWithScreenshot(fakeInspector, "sig-unknown");
-        var blocks = (await new CaptureTools(sessions, NewStore()).Screenshot()).ToList();
+        var blocks = (await new CaptureTools(sessions, NewStore(), new ScreenTracker()).Screenshot()).ToList();
         await responding;
 
         var summary = Assert.IsType<TextContentBlock>(blocks[0]);
@@ -142,12 +142,40 @@ public class CaptureToolsTests : IDisposable
         await accepting;
 
         var responding = RespondWithScreenshot(fakeInspector, signature);
-        var blocks = (await new CaptureTools(sessions, NewStore()).Screenshot()).ToList();
+        var blocks = (await new CaptureTools(sessions, NewStore(), new ScreenTracker()).Screenshot()).ToList();
         await responding;
 
         var summary = Assert.IsType<TextContentBlock>(blocks[0]);
         Assert.Contains("already learned", summary.Text);
         Assert.DoesNotContain("xapper_screen_learn", summary.Text);
+    }
+
+    [Fact]
+    public async Task Screenshot_CountsTheShots_WhenNothingIsRecordedBetweenThem()
+    {
+        // 같은 화면을 거듭 찍으면서 아무것도 남기지 않는 것이 가장 흔한 낭비다. 몇 장째인지를 들이민다.
+        const string signature = "sig-repeat";
+        var tracker = new ScreenTracker();
+
+        var processId = FakeInspector.NextProcessId();
+        await using var fakeInspector = FakeInspector.Create(processId);
+        await using var sessions = new SessionManager();
+        var accepting = fakeInspector.WaitForConnectionAsync();
+        await sessions.AttachAsync(processId);
+        await accepting;
+
+        var first = RespondWithScreenshot(fakeInspector, signature);
+        var firstBlocks = (await new CaptureTools(sessions, NewStore(), tracker).Screenshot()).ToList();
+        await first;
+
+        var second = RespondWithScreenshot(fakeInspector, signature);
+        var secondBlocks = (await new CaptureTools(sessions, NewStore(), tracker).Screenshot()).ToList();
+        await second;
+
+        Assert.DoesNotContain("picture 2 of this screen",
+            Assert.IsType<TextContentBlock>(firstBlocks[0]).Text);
+        Assert.Contains("picture 2 of this screen",
+            Assert.IsType<TextContentBlock>(secondBlocks[0]).Text);
     }
 
     [Fact]
@@ -162,7 +190,7 @@ public class CaptureToolsTests : IDisposable
         await accepting;
 
         var responding = RespondWithScreenshot(fakeInspector);
-        var blocks = (await new CaptureTools(sessions, NewStore()).Screenshot()).ToList();
+        var blocks = (await new CaptureTools(sessions, NewStore(), new ScreenTracker()).Screenshot()).ToList();
         await responding;
 
         var summary = Assert.IsType<TextContentBlock>(blocks[0]);
@@ -188,7 +216,7 @@ public class CaptureToolsTests : IDisposable
         try
         {
             var responding = RespondWithScreenshot(fakeInspector);
-            var blocks = (await new CaptureTools(sessions, NewStore()).Screenshot(savePath: savePath)).ToList();
+            var blocks = (await new CaptureTools(sessions, NewStore(), new ScreenTracker()).Screenshot(savePath: savePath)).ToList();
             await responding;
 
             var summary = Assert.IsType<TextContentBlock>(blocks[0]);
@@ -204,7 +232,7 @@ public class CaptureToolsTests : IDisposable
     [Fact]
     public async Task Screenshot_WithNonPositiveMaxWidth_SaysSoInsteadOfSilentlyIgnoringIt()
     {
-        var blocks = (await new CaptureTools(new SessionManager(), NewStore()).Screenshot(maxWidth: 0)).ToList();
+        var blocks = (await new CaptureTools(new SessionManager(), NewStore(), new ScreenTracker()).Screenshot(maxWidth: 0)).ToList();
 
         var only = Assert.IsType<TextContentBlock>(Assert.Single(blocks));
         Assert.Contains("maxWidth", only.Text);

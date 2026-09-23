@@ -19,6 +19,7 @@ public sealed class CaptureTools
 
     private readonly SessionManager _sessionManager;
     private readonly ScreenStore _store;
+    private readonly ScreenTracker _tracker;
 
     #endregion
 
@@ -29,10 +30,12 @@ public sealed class CaptureTools
     /// </summary>
     /// <param name="sessionManager">활성 Inspector 세션을 제공하는 세션 관리자.</param>
     /// <param name="store">화면 기록이 사는 저장소. 이미 배워 둔 화면이면 그림 대신 기록을 내주기 위해 본다.</param>
-    public CaptureTools(SessionManager sessionManager, ScreenStore store)
+    /// <param name="tracker">같은 화면을 몇 장째 찍고 있는지 세어 두는 싱글턴. 이 도구는 호출마다 새로 만들어진다.</param>
+    public CaptureTools(SessionManager sessionManager, ScreenStore store, ScreenTracker tracker)
     {
         _sessionManager = sessionManager;
         _store = store;
+        _tracker = tracker;
     }
 
     #endregion
@@ -98,7 +101,7 @@ public sealed class CaptureTools
         if (markList.Length > 0)
             summary += "\n" + markList;
 
-        summary += RecordHint(known);
+        summary += RecordHint(known, result.Signature is { } taken ? _tracker.CountPicture(taken) : 1);
 
         if (result.Warning is not null)
             summary += $"\nWARNING: {result.Warning}";
@@ -140,15 +143,23 @@ public sealed class CaptureTools
     /// 상태를 두고 다른 말을 하게 된다. 배우는 일이 남는 것은 기록이 아예 없을 때뿐이다.
     /// </summary>
     /// <param name="record">지금 화면의 기록. 없으면 null.</param>
-    private static string RecordHint(ScreenRecord? record)
+    /// <param name="pictureCount">마지막으로 이 화면에 무언가를 기록한 뒤 몇 장째인지.</param>
+    private static string RecordHint(ScreenRecord? record, int pictureCount)
     {
-        if (record is null)
-            return "\nThis screen is not in the record yet. Once you understand it, call xapper_screen_learn so " +
-                   "the next visit needs no picture.";
+        var hint = record is null
+            ? "\nThis screen is not in the record yet. Put what this picture told you into xapper_screen_learn " +
+              "before you move on, so the next visit needs no picture."
+            : $"\nThis screen is already learned as \"{record.Name}\". Call xapper_screen_recall for its " +
+              "selectors instead of looking again - stale ones are retaken there without being asked - and put " +
+              "what this picture told you into xapper_screen_note before you move on.";
 
-        return $"\nThis screen is already learned as \"{record.Name}\". Call xapper_screen_recall for its " +
-               "selectors instead of looking again - stale ones are retaken there without being asked - and " +
-               "xapper_screen_note to record what you have just found out.";
+        // 같은 화면을 거듭 찍으면서 아무것도 남기지 않는 것이 가장 흔한 낭비다. 한 장째에는 권하고, 그 뒤로는
+        // 몇 장째인지를 들이민다. 세어 보이는 편이 같은 문장을 되풀이하는 것보다 잘 읽힌다.
+        if (pictureCount > 1)
+            hint += $" This is picture {pictureCount} of this screen since anything was last recorded about it; " +
+                    "whatever the earlier ones told you is still only in this conversation and dies with it.";
+
+        return hint;
     }
 
     /// <summary>
