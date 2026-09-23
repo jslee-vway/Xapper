@@ -133,7 +133,11 @@ Two tools send a sequence:
 
 Choose by what you actually need to know:
 
-- **Did the action work?** The action's own response already said so.
+- **Did the action work?** The action's own response already said so. When it does not go far enough -
+  a click that should have selected a row, a key that should have committed an edit - `xapper_events`
+  reads what the app itself raised. That reaches where the tree does not: a grid painting its own
+  cells has no element to inspect, yet its selection still raises an event. Ask right after acting,
+  while what you are looking for is near the end of the list.
 - **What is this one value now?** `xapper_get_property` or `xapper_assert`.
 - **What does this panel hold?** `xapper_snapshot` with `rootRef` set to it. Same content, as text.
 - **How is it drawn?** Only then a picture: layout, rendering, a chart, a control that paints itself.

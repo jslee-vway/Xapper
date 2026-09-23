@@ -452,6 +452,7 @@ public sealed class IpcServer
                 "getBindings" => await HandleGetBindings(message),
                 "screenshot" => await HandleScreenshot(message),
                 "screenProfile" => await HandleScreenProfile(message),
+                "events" => await HandleEvents(message),
                 "assert" => await HandleAssert(message),
                 "find" => await HandleFind(message),
                 "elementAt" => await HandleElementAt(message),
@@ -1312,6 +1313,50 @@ public sealed class IpcServer
                 "The app has no main window yet, so there is no screen to fingerprint.");
 
         return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
+    /// 앱에서 최근에 일어난 이벤트를 돌려줍니다.
+    /// 시각 트리가 답하지 못하는 물음이 있어서 낸 통로다. 고성능 그리드는 셀을 요소로 만들지 않으므로
+    /// "행을 눌렀는데 눌렸는가" 를 트리에서는 확인할 수 없지만, 요소가 없어도 이벤트는 난다.
+    /// </summary>
+    private async Task<IpcMessage> HandleEvents(IpcMessage message)
+    {
+        var request = message.Payload is { } payload
+            ? IpcSerializer.DeserializePayload<EventsRequest>(payload)
+            : new EventsRequest();
+
+        // 물어볼 때마다 다시 훑는다. 방금 뜬 대화상자의 이벤트는 조금 전까지 존재하지도 않았다.
+        await EnsureWatchingAsync();
+
+        var now = Environment.TickCount64;
+        var response = new EventsResponse { Stored = Events.EventWatcher.Log.Count };
+
+        foreach (var entry in Events.EventWatcher.Log.Recent(request.Count, request.Filter))
+        {
+            response.Events.Add(new EventEntry
+            {
+                Name = entry.Name,
+                SourceType = entry.SourceType,
+                SourceName = entry.SourceName,
+                Detail = entry.Detail,
+                AgoMs = Math.Max(0, now - entry.At)
+            });
+        }
+
+        return IpcSerializer.CreateResponse(message.Id, response);
+    }
+
+    /// <summary>
+    /// 이벤트 엿보기를 아직 걸지 않았으면 겁니다. 클래스 핸들러는 UI 스레드에서만 걸 수 있다.
+    /// 앱이 뜨자마자 걸지 않는 이유는, 주입되는 시점에 아직 Application 이 없을 수 있기 때문이다.
+    /// </summary>
+    private static async Task EnsureWatchingAsync()
+    {
+        if (Application.Current is null)
+            return;
+
+        await Application.Current.Dispatcher.InvokeAsync(() => Events.EventWatcher.EnsureRegistered());
     }
 
     /// <summary>

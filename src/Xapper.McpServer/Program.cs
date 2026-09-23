@@ -46,9 +46,14 @@ else
 var serverInstructions = """
     Load these tools together before you start, not one at a time: xapper_screen_recall, xapper_screen_learn,
     xapper_screen_note, xapper_run, xapper_launch, xapper_find, xapper_snapshot, xapper_click, xapper_type,
-    xapper_key, xapper_get_property, xapper_assert, xapper_element_at, xapper_screenshot. The first three are the ones agents forget, and they
+    xapper_key, xapper_get_property, xapper_assert, xapper_element_at, xapper_events, xapper_screenshot. The first three are the ones agents forget, and they
     are the ones that cut the most work: recall replaces a screenshot on a screen you have seen before, run
     replaces a whole chain of calls, and launch replaces attaching.
+
+    When you need to know whether an action landed, xapper_events reads what the app itself raised - a click on a
+    grid row shows up as the selection changing, typing as the text changing, a button that did nothing as
+    nothing at all. It reaches where the visual tree does not: a grid that paints its own cells has no element
+    to inspect but still raises events.
 
     Three habits waste far more than anything else. Do not screenshot to check whether an action worked - the
     action's own response already says what happened, and xapper_get_property or xapper_assert confirms a value
@@ -147,7 +152,8 @@ builder.Services.AddMcpServer(options =>
 .WithTools<BatchTools>()
 .WithTools<NoticeTools>()
 .WithTools<RunTools>()
-.WithTools<ScreenTools>();
+.WithTools<ScreenTools>()
+.WithTools<EventTools>();
 
 var app = builder.Build();
 await app.RunAsync();
